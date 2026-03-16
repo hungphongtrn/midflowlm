@@ -9,6 +9,10 @@ from .qwen_parity import (
 )
 from .midblock import IterativeMidblock
 from .adapter import StepConditioningAdapter, BoundaryConditioningAdapter
+from .student_qwen import (
+    FrozenQwenStudent,
+    StudentOutput,
+)
 
 __all__ = [
     "QwenInspector",
@@ -19,4 +23,6 @@ __all__ = [
     "IterativeMidblock",
     "StepConditioningAdapter",
     "BoundaryConditioningAdapter",
+    "FrozenQwenStudent",
+    "StudentOutput",
 ]
