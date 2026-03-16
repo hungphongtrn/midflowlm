@@ -13,7 +13,7 @@ model:
 replacement_model:
   family: "minfm-hidden-refiner"
   source_repo: "external/minFM"
-  source_commit: null  # To be pinned in Task 2
+  source_commit: "2b15c5ffa9f6a083650994e385ee11ca23ee7ab7"
   start_layer: 8
   end_layer: 11
   architecture_mode: "causal_hidden_refiner"
