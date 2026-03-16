@@ -94,3 +94,45 @@ logging:
   save_top_k: 2
   monitor: "val/total_loss"
   mode: "min"
+
+# Operational Documentation
+# =========================
+# This section documents operational assumptions for running v0 experiments.
+#
+## Minimum Hardware Requirements
+# - GPU: 1x GPU with at least 16GB VRAM (tested on 24GB)
+# - RAM: 32GB system memory recommended
+# - Storage: ~10GB for teacher cache + model checkpoints
+#
+## Teacher Cache Information
+# - Cache location: ./cache/tinystories_qwen_boundary_states/
+# - Cache size: ~2-3GB for 20k training samples at seq_len=128
+# - Cache includes: h_start, trajectory_targets, h_target, teacher_logits
+# - Must be built BEFORE training: python scripts/build_teacher_cache.py --config configs/v0_onemotif.yaml
+#
+## Checkpoint Naming Scheme
+# - Format: checkpoint_epoch_{N}_step_{M}_loss_{loss:.4f}.pt
+# - Location: ./outputs/v0_qwen_iterative_midblock/checkpoints/
+# - Best checkpoints saved according to save_top_k and monitor settings
+#
+## Resume Training
+# - Use: python scripts/train_v0.py --config configs/v0_onemotif.yaml --resume-from-checkpoint <path>
+#
+## Smoke Test Runtime
+# - Teacher cache (8 samples): ~30 seconds
+# - Training fast-dev-run: ~2-3 minutes
+# - Training 2 batches: ~3-5 minutes
+# - Evaluation (8 samples): ~30 seconds
+#
+## Expected Workflow
+# 1. Build teacher cache: python scripts/build_teacher_cache.py --config configs/v0_onemotif.yaml
+# 2. Print model stats: python scripts/print_model_stats.py --config configs/v0_onemotif.yaml
+# 3. Run training: python scripts/train_v0.py --config configs/v0_onemotif.yaml
+# 4. Run evaluation: python scripts/eval_v0.py --config configs/v0_onemotif.yaml
+#
+## Go/No-Go Criteria
+# Before scaling up, verify:
+# - Teacher cache is deterministic and complete
+# - Parity tests pass (pytest tests/test_qwen_parity.py -v)
+# - Training smoke tests pass (pytest tests/test_train_smoke.py -v)
+# - Iterative block beats identity baseline

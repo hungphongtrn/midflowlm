@@ -715,3 +715,66 @@ Execute tasks in this exact order:
 
 Do not start student training implementation before Tasks 3, 5, and 6 are complete.
 Do not claim success before Task 11 baselines exist.
+
+---
+
+## Quick Start (Zero-Prior-Context)
+
+This section is for someone discovering this repository with no prior context.
+
+### Prerequisites
+- Python 3.10+
+- CUDA-capable GPU with 16GB+ VRAM (24GB recommended)
+- 32GB system RAM
+- ~10GB free disk space
+
+### Installation
+```bash
+cd midflowlm
+pip install -r requirements.txt
+```
+
+### View Model Statistics
+```bash
+python scripts/print_model_stats.py --config configs/v0_onemotif.yaml
+```
+
+### Full Workflow (Minimal Test)
+```bash
+# 1. Build teacher cache (required before training)
+python scripts/build_teacher_cache.py --config configs/v0_onemotif.yaml --limit 8
+
+# 2. Run fast training smoke test
+python scripts/train_v0.py --config configs/v0_onemotif.yaml --fast-dev-run
+
+# 3. Run evaluation
+python scripts/eval_v0.py --config configs/v0_onemotif.yaml --limit 8
+```
+
+### Run All Tests
+```bash
+python -m pytest tests/ -v
+```
+
+### What This Implementation Does
+- Replaces layers 8-11 of Qwen3.5-0.8B with an iterative refinement block
+- Trains only the replacement block (~1-2% of total parameters)
+- Uses trajectory distillation from teacher model intermediate states
+- Supports variable T (iterative steps) during training
+
+### Expected Results
+- Trainable parameters: ~10-20M (exact count from print_model_stats.py)
+- Frozen parameters: ~800M (full Qwen3.5-0.8B)
+- Training time: ~1-3 hours for 20k samples (1 epoch, single GPU)
+
+### Troubleshooting
+- **Out of memory**: Reduce batch size or enable gradient checkpointing
+- **Cache not found**: Run build_teacher_cache.py first
+- **Import errors**: Ensure you're in the midflowlm/ directory
+
+### Key Files
+- `configs/v0_onemotif.yaml` - Main configuration
+- `scripts/print_model_stats.py` - Model statistics
+- `scripts/build_teacher_cache.py` - Teacher cache generation
+- `scripts/train_v0.py` - Training script
+- `scripts/eval_v0.py` - Evaluation script
