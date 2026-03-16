@@ -221,7 +221,9 @@ class TeacherCacheWriter:
         if HAS_SAFETENSORS:
             save_file(tensors_to_save, str(shard_path))
         else:
-            torch.save(tensors_to_save, shard_path)
+            # Use .pt extension for torch format
+            pt_path = str(shard_path).replace(".safetensors", ".pt")
+            torch.save(tensors_to_save, pt_path)
 
         logger.info(f"Wrote shard {shard_idx}/{num_shards} to {shard_path}")
 
@@ -297,15 +299,23 @@ def load_shard(
     """
     cache_dir = Path(cache_dir)
     shard_path = cache_dir / f"shard_{shard_idx:04d}_of_{num_shards:04d}.safetensors"
+    pt_path = cache_dir / f"shard_{shard_idx:04d}_of_{num_shards:04d}.pt"
 
-    if not shard_path.exists():
-        raise FileNotFoundError(f"Shard not found: {shard_path}")
-
-    # Load using safetensors if available, otherwise torch.load
-    if HAS_SAFETENSORS:
-        loaded = load_file(str(shard_path))
+    # Try safetensors first, then .pt fallback
+    if shard_path.exists():
+        load_path = shard_path
+        use_safetensors = True
+    elif pt_path.exists():
+        load_path = pt_path
+        use_safetensors = False
     else:
-        loaded = torch.load(shard_path, map_location=device)
+        raise FileNotFoundError(f"Shard not found: {shard_path} or {pt_path}")
+
+    # Load using appropriate format
+    if use_safetensors and HAS_SAFETENSORS:
+        loaded = load_file(str(load_path))
+    else:
+        loaded = torch.load(load_path, map_location=device)
 
     # Reconstruct trajectory_targets list
     if "num_trajectory_targets" in loaded:
