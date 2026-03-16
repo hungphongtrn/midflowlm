@@ -1,0 +1,96 @@
+experiment_name: "v0_qwen_iterative_midblock"
+seed: 1337
+
+model:
+  name: "Qwen/Qwen3.5-0.8B"
+  revision: null
+  max_steps_T: 8
+  train_T_values: [1, 2, 4, 6, 8]
+  train_T_weights: [0.20, 0.35, 0.20, 0.15, 0.10]
+  step_embedding: "discrete"
+  reuse_qwen_modules: true
+
+replacement_model:
+  family: "minfm-hidden-refiner"
+  source_repo: "external/minFM"
+  source_commit: null  # To be pinned in Task 2
+  start_layer: 8
+  end_layer: 11
+  architecture_mode: "causal_hidden_refiner"
+  depth: 4
+  mlp_ratio: 4.0
+  qkv_bias: true
+  use_qwen_causal_mask: true
+  use_step_conditioning: true
+  conditioning_mode: "timestep_plus_layer_boundary"
+  init_strategy: "fresh"
+  trajectory_alignment:
+    # Policies for different T regimes relative to span depth
+    T_less_than_depth:
+      policy: "compression"
+      description: "Compress teacher trajectory to match student steps"
+      method: "uniform_sampling"  # Options: uniform_sampling, weighted_sampling
+    T_equals_depth:
+      policy: "exact"
+      description: "Exact layerwise trajectory matching"
+      method: "one_to_one_mapping"
+    T_greater_than_depth:
+      policy: "expansion"
+      description: "Expand/interpolate teacher trajectory (approximate)"
+      method: "linear_interpolation"
+      note: "Results are approximate when T exceeds teacher depth"
+
+teacher_cache:
+  enabled: true
+  cache_dir: "./cache/tinystories_qwen_boundary_states"
+  store_logits: true
+  store_hidden_states: true
+  overwrite: false
+
+data:
+  dataset_name: "roneneldan/TinyStories"
+  dataset_revision: null
+  text_field: "text"
+  seq_len: 128
+  train_samples: 20000
+  val_samples: 1000
+  test_samples: 1000
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  shuffle_seed: 1337
+
+loss:
+  endpoint_weight: 1.0
+  trajectory_weight: 1.0
+  kl_weight: 0.25
+  ce_weight: 0.0
+  mask_padding_tokens: true
+
+optimizer:
+  name: "adamw"
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+  grad_clip_norm: 1.0
+
+scheduler:
+  name: "cosine_with_warmup"
+  warmup_steps: 100
+
+train_loop:
+  precision: "bf16-mixed"
+  max_epochs: 3
+  accumulate_grad_batches: 4
+  log_every_n_steps: 10
+  val_check_interval: 250
+  gradient_checkpointing: false
+  checkpoint_dir: "./outputs/v0_qwen_iterative_midblock/checkpoints"
+  resume_from_checkpoint: null
+
+logging:
+  log_dir: "./outputs/v0_qwen_iterative_midblock/logs"
+  save_top_k: 2
+  monitor: "val/total_loss"
+  mode: "min"
