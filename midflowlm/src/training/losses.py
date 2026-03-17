@@ -188,7 +188,8 @@ class DistillationLoss(nn.Module):
             if "teacher_logits" not in teacher_batch:
                 raise ValueError(
                     "teacher_logits is required for KL loss but is missing from teacher_batch. "
-                    "Either provide teacher_logits or set kl_weight=0."
+                    "teacher_logits is not part of the default architecture-training cache; "
+                    "set kl_weight=0 or add an explicit behavior-training path."
                 )
 
             kl_losses = self.compute_kl_loss(
@@ -243,11 +244,13 @@ class DistillationLoss(nn.Module):
         """
         # Fail fast if teacher hidden is missing
         if teacher_hidden is None:
-            raise ValueError("h_target (teacher endpoint hidden state) is required but got None")
+            raise ValueError(
+                "h_target (teacher endpoint hidden state) is required but got None"
+            )
 
         # Compute squared error
         diff = student_hidden - teacher_hidden
-        squared_error = (diff ** 2).mean(dim=-1)  # [batch, seq]
+        squared_error = (diff**2).mean(dim=-1)  # [batch, seq]
 
         # Apply masking if enabled
         if self.config.mask_padding_tokens and attention_mask is not None:
@@ -306,7 +309,7 @@ class DistillationLoss(nn.Module):
 
         # Compute MSE over all trajectory steps
         diff = student_trajectory - aligned_teacher
-        squared_error = (diff ** 2).mean(dim=-1)  # [batch, seq, T]
+        squared_error = (diff**2).mean(dim=-1)  # [batch, seq, T]
 
         # Apply masking if enabled
         if self.config.mask_padding_tokens and attention_mask is not None:

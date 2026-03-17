@@ -43,17 +43,17 @@ class TestArchitectureLossContract:
             span_depth=4,
         )
 
-        # Create dummy student outputs
+        # Create dummy student outputs (trajectory shape: [batch, seq, T, hidden])
         student_outputs = {
             "endpoint_hidden": torch.randn(2, 128, 32),
-            "trajectory_hidden": [torch.randn(2, 128, 32) for _ in range(4)],
+            "trajectory_hidden": torch.randn(2, 128, 4, 32),
             "logits": torch.randn(2, 128, 1000),
         }
 
-        # Create teacher batch without logits
+        # Create teacher batch without logits (trajectory shape: [batch, seq, depth, hidden])
         teacher_batch_without_logits = {
             "h_target": torch.randn(2, 128, 32),
-            "trajectory_targets": [torch.randn(2, 128, 32) for _ in range(4)],
+            "trajectory_targets": torch.randn(2, 128, 4, 32),
         }
 
         with pytest.raises(
@@ -76,16 +76,16 @@ class TestArchitectureLossContract:
             span_depth=4,
         )
 
-        # Create dummy student outputs
+        # Create dummy student outputs (trajectory shape: [batch, seq, T, hidden])
         student_outputs = {
             "endpoint_hidden": torch.randn(2, 128, 32),
-            "trajectory_hidden": [torch.randn(2, 128, 32) for _ in range(4)],
+            "trajectory_hidden": torch.randn(2, 128, 4, 32),
         }
 
-        # Create teacher batch without logits
+        # Create teacher batch without logits (trajectory shape: [batch, seq, depth, hidden])
         teacher_batch = {
             "h_target": torch.randn(2, 128, 32),
-            "trajectory_targets": [torch.randn(2, 128, 32) for _ in range(4)],
+            "trajectory_targets": torch.randn(2, 128, 4, 32),
         }
 
         # Should not raise an error

@@ -43,7 +43,9 @@ replacement_model:
 teacher_cache:
   enabled: true
   cache_dir: "./cache/tinystories_qwen_boundary_states"
-  store_logits: true
+  # Architecture training caches hidden states only by default.
+  # Behavior training that needs logits should use online teacher forwards in a later task.
+  store_logits: false
   store_hidden_states: true
   overwrite: false
 
@@ -63,7 +65,9 @@ data:
 loss:
   endpoint_weight: 1.0
   trajectory_weight: 1.0
-  kl_weight: 0.25
+  # Default architecture training uses hidden-state supervision only.
+  # Set kl_weight > 0 only for behavior training with online teacher logits.
+  kl_weight: 0.0
   ce_weight: 0.0
   mask_padding_tokens: true
 
