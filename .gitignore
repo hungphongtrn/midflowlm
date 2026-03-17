@@ -1,0 +1,6 @@
+# Created by pytest automatically.
+.venv/
+CACHEDIR.TAG
+__pycache__/
+cache/
+.worktrees/
