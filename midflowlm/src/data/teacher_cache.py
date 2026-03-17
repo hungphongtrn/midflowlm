@@ -19,6 +19,7 @@ import logging
 # Optional safetensors import with fallback
 try:
     from safetensors.torch import save_file, load_file
+
     HAS_SAFETENSORS = True
 except ImportError:
     HAS_SAFETENSORS = False
@@ -30,10 +31,24 @@ from src.model.qwen_parity import QwenInspector
 logger = logging.getLogger(__name__)
 
 
+def resolve_split_cache_dir(cache_dir: Union[str, Path], split: str) -> Path:
+    """Resolve cache directory for a specific split.
+
+    Args:
+        cache_dir: Root cache directory
+        split: Dataset split (train/val/test)
+
+    Returns:
+        Path to split-specific cache directory
+    """
+    cache_root = Path(cache_dir)
+    return cache_root / split
+
+
 @dataclass
 class CacheMetadata:
     """Metadata for teacher cache.
-    
+
     Attributes:
         model_name: Name of the teacher model
         model_revision: Revision/commit hash of the model
@@ -41,16 +56,17 @@ class CacheMetadata:
         end_layer: Last layer of replacement span (inclusive)
         span_depth: Number of layers in the span (end_layer - start_layer + 1)
         seq_len: Sequence length for cached samples
-        store_logits: Whether logits are stored in the cache
+        store_logits: Whether logits are stored in the cache (default: False)
         num_samples: Total number of samples cached
     """
+
     model_name: str
     model_revision: Optional[str]
     start_layer: int
     end_layer: int
     span_depth: int
     seq_len: int
-    store_logits: bool
+    store_logits: bool = False
     num_samples: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -65,7 +81,7 @@ class CacheMetadata:
 
 class TeacherCacheWriter:
     """Writer for teacher cache with full trajectory targets.
-    
+
     This class handles:
     - Creating cache directory structure
     - Writing metadata
@@ -80,12 +96,12 @@ class TeacherCacheWriter:
         start_layer: int = 8,
         end_layer: int = 11,
         seq_len: int = 128,
-        store_logits: bool = True,
+        store_logits: bool = False,
         model_revision: Optional[str] = None,
         overwrite: bool = False,
     ):
         """Initialize TeacherCacheWriter.
-        
+
         Args:
             cache_dir: Directory to store cache files
             model_name: Name of the teacher model
@@ -111,12 +127,14 @@ class TeacherCacheWriter:
 
         logger.info(f"Initialized TeacherCacheWriter at {self.cache_dir}")
         logger.info(f"  Model: {model_name}")
-        logger.info(f"  Span: layers {start_layer}-{end_layer} (depth={self.span_depth})")
+        logger.info(
+            f"  Span: layers {start_layer}-{end_layer} (depth={self.span_depth})"
+        )
         logger.info(f"  Store logits: {store_logits}")
 
     def write_metadata(self, num_samples: int) -> None:
         """Write metadata to cache directory.
-        
+
         Args:
             num_samples: Total number of samples in the cache
         """
@@ -139,11 +157,11 @@ class TeacherCacheWriter:
 
     def _get_shard_path(self, shard_idx: int, num_shards: int) -> Path:
         """Get the path for a shard file.
-        
+
         Args:
             shard_idx: Index of the shard
             num_shards: Total number of shards
-            
+
         Returns:
             Path to the shard file
         """
@@ -151,11 +169,11 @@ class TeacherCacheWriter:
 
     def shard_exists(self, shard_idx: int, num_shards: int) -> bool:
         """Check if a shard already exists.
-        
+
         Args:
             shard_idx: Index of the shard
             num_shards: Total number of shards
-            
+
         Returns:
             True if the shard exists, False otherwise
         """
@@ -169,7 +187,7 @@ class TeacherCacheWriter:
         num_shards: int,
     ) -> None:
         """Write a sample shard to cache.
-        
+
         Args:
             sample_data: Dictionary with sample data including:
                 - input_ids: Token IDs
@@ -207,7 +225,9 @@ class TeacherCacheWriter:
             for i, target in enumerate(trajectory_targets):
                 tensors_to_save[f"trajectory_target_{i}"] = target.clone()
             # Store count for loading
-            tensors_to_save["num_trajectory_targets"] = torch.tensor(len(trajectory_targets))
+            tensors_to_save["num_trajectory_targets"] = torch.tensor(
+                len(trajectory_targets)
+            )
 
         # Add h_target (clone to avoid shared memory with last trajectory target)
         if "h_target" in sample_data:
@@ -232,16 +252,16 @@ def generate_sample_cache(
     sample: Dict[str, torch.Tensor],
     inspector: QwenInspector,
     device: str = "cpu",
-    store_logits: bool = True,
+    store_logits: bool = False,
 ) -> Dict[str, Any]:
     """Generate cache data for a single sample.
-    
+
     Args:
         sample: Dictionary with input_ids and attention_mask
         inspector: QwenInspector instance for extracting teacher outputs
         device: Device to run inference on
         store_logits: Whether to store teacher logits
-        
+
     Returns:
         Dictionary with cached data:
             - input_ids: Token IDs
@@ -275,7 +295,9 @@ def generate_sample_cache(
     }
 
     if store_logits:
-        cache_data["teacher_logits"] = outputs["logits"].cpu().squeeze(0)  # Remove batch dim
+        cache_data["teacher_logits"] = (
+            outputs["logits"].cpu().squeeze(0)
+        )  # Remove batch dim
 
     return cache_data
 
@@ -287,13 +309,13 @@ def load_shard(
     device: str = "cpu",
 ) -> Dict[str, torch.Tensor]:
     """Load a cached shard.
-    
+
     Args:
         cache_dir: Directory containing cache files
         shard_idx: Index of the shard to load
         num_shards: Total number of shards
         device: Device to load tensors to
-        
+
     Returns:
         Dictionary with loaded tensors
     """
@@ -332,10 +354,10 @@ def load_shard(
 
 def load_metadata(cache_dir: Union[str, Path]) -> CacheMetadata:
     """Load cache metadata.
-    
+
     Args:
         cache_dir: Directory containing cache files
-        
+
     Returns:
         CacheMetadata object
     """
@@ -357,14 +379,14 @@ def build_teacher_cache(
     start_layer: int = 8,
     end_layer: int = 11,
     seq_len: int = 128,
-    store_logits: bool = True,
+    store_logits: bool = False,
     device: str = "cpu",
     overwrite: bool = False,
 ) -> TeacherCacheWriter:
     """Create a TeacherCacheWriter with the specified configuration.
-    
+
     This is a convenience factory function for creating a cache writer.
-    
+
     Args:
         cache_dir: Directory to store cache files
         model_name: Name of the teacher model
@@ -374,7 +396,7 @@ def build_teacher_cache(
         store_logits: Whether to store teacher logits
         device: Device for model inference
         overwrite: Whether to overwrite existing cache
-        
+
     Returns:
         Configured TeacherCacheWriter instance
     """

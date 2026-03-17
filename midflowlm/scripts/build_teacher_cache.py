@@ -27,6 +27,7 @@ from src.data.teacher_cache import (
     TeacherCacheWriter,
     generate_sample_cache,
     load_metadata,
+    resolve_split_cache_dir,
 )
 from src.data.tinystories import get_tinystories_dataloaders
 from src.model.qwen_parity import QwenInspector
@@ -47,6 +48,7 @@ def load_config(config_path: str) -> dict:
 
 def create_namespace(config: dict) -> argparse.Namespace:
     """Convert config dict to Namespace for compatibility with existing code."""
+
     class ConfigNamespace:
         pass
 
@@ -74,7 +76,7 @@ def build_cache(
     device: Optional[str] = None,
 ) -> None:
     """Build teacher cache for the specified configuration.
-    
+
     Args:
         config_path: Path to configuration YAML file
         split: Dataset split to cache (train/val/test)
@@ -94,8 +96,9 @@ def build_cache(
 
     # Extract cache configuration
     cache_config = config_dict.get("teacher_cache", {})
-    cache_dir = cache_config.get("cache_dir", "./cache/teacher_cache")
-    store_logits = cache_config.get("store_logits", True)
+    cache_root = cache_config.get("cache_dir", "./cache/teacher_cache")
+    cache_dir = resolve_split_cache_dir(cache_root, split)
+    store_logits = cache_config.get("store_logits", False)
 
     # Extract model configuration
     model_name = config_dict["model"]["name"]
@@ -129,7 +132,9 @@ def build_cache(
     # Check if cache already exists
     try:
         existing_metadata = load_metadata(cache_dir)
-        logger.info(f"Found existing cache with {existing_metadata.num_samples} samples")
+        logger.info(
+            f"Found existing cache with {existing_metadata.num_samples} samples"
+        )
         if not overwrite:
             logger.info("Use --overwrite to rebuild cache")
             return
@@ -154,7 +159,9 @@ def build_cache(
     )
 
     if split not in dataloaders:
-        raise ValueError(f"Split '{split}' not found. Available: {list(dataloaders.keys())}")
+        raise ValueError(
+            f"Split '{split}' not found. Available: {list(dataloaders.keys())}"
+        )
 
     dataloader = dataloaders[split]
 
@@ -206,7 +213,7 @@ def build_cache(
 
 def verify_cache(cache_dir: str, num_samples: int = 1) -> None:
     """Verify cache contents by loading and checking samples.
-    
+
     Args:
         cache_dir: Directory containing cache files
         num_samples: Number of samples to verify
@@ -236,7 +243,9 @@ def verify_cache(cache_dir: str, num_samples: int = 1) -> None:
             logger.info(f"Sample {i}:")
             logger.info(f"  input_ids shape: {data['input_ids'].shape}")
             logger.info(f"  h_start shape: {data['h_start'].shape}")
-            logger.info(f"  trajectory_targets count: {len(data['trajectory_targets'])}")
+            logger.info(
+                f"  trajectory_targets count: {len(data['trajectory_targets'])}"
+            )
             logger.info(f"  h_target shape: {data['h_target'].shape}")
             if "teacher_logits" in data:
                 logger.info(f"  teacher_logits shape: {data['teacher_logits'].shape}")
@@ -305,7 +314,8 @@ def main():
     if args.verify_only:
         # Load config to get cache_dir
         config = load_config(args.config)
-        cache_dir = config["teacher_cache"]["cache_dir"]
+        cache_root = config["teacher_cache"]["cache_dir"]
+        cache_dir = resolve_split_cache_dir(cache_root, args.split)
         verify_cache(cache_dir, num_samples=args.limit or 3)
     else:
         build_cache(
@@ -319,7 +329,8 @@ def main():
 
         if args.verify:
             config = load_config(args.config)
-            cache_dir = config["teacher_cache"]["cache_dir"]
+            cache_root = config["teacher_cache"]["cache_dir"]
+            cache_dir = resolve_split_cache_dir(cache_root, args.split)
             verify_cache(cache_dir, num_samples=args.limit or 3)
 
 
