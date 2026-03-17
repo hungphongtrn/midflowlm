@@ -1,5 +1,8 @@
 # AGENTS.md
 
+- **Always run "beans prime" at the task! **
+- All implemenetations go into `src` at root
+
 Repository working rules for Hermes and other coding agents.
 
 ## 1. Reuse before building

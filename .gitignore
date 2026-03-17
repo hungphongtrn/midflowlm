@@ -2,5 +2,7 @@
 .venv/
 CACHEDIR.TAG
 __pycache__/
-cache/
 .worktrees/
+.agent*
+.opencode/
+*cache/
