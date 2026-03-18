@@ -16,6 +16,7 @@ from transformers import AutoModelForCausalLM, AutoConfig
 from dataclasses import dataclass
 
 from src.model.midblock import IterativeMidblock
+from src.model.ode import MidblockVectorField, build_solver_options
 
 
 class StudentOutput(dict):
@@ -27,17 +28,41 @@ class StudentOutput(dict):
     - isinstance checks: isinstance(output, dict)
     """
 
-    def __init__(self, logits: torch.Tensor):
-        super().__init__(logits=logits)
+    def __init__(
+        self,
+        logits: torch.Tensor,
+        endpoint_hidden: Optional[torch.Tensor] = None,
+        trajectory_hidden: Optional[torch.Tensor] = None,
+    ):
+        super().__init__()
+        self["logits"] = logits
         self._logits = logits
+        if endpoint_hidden is not None:
+            self["endpoint_hidden"] = endpoint_hidden
+            self._endpoint_hidden = endpoint_hidden
+        if trajectory_hidden is not None:
+            self["trajectory_hidden"] = trajectory_hidden
+            self._trajectory_hidden = trajectory_hidden
 
     @property
     def logits(self) -> torch.Tensor:
         return self._logits
 
+    @property
+    def endpoint_hidden(self) -> Optional[torch.Tensor]:
+        return getattr(self, "_endpoint_hidden", None)
+
+    @property
+    def trajectory_hidden(self) -> Optional[torch.Tensor]:
+        return getattr(self, "_trajectory_hidden", None)
+
     def __getattr__(self, name: str) -> Any:
         if name == "logits":
             return self._logits
+        elif name == "endpoint_hidden":
+            return getattr(self, "_endpoint_hidden", None)
+        elif name == "trajectory_hidden":
+            return getattr(self, "_trajectory_hidden", None)
         raise AttributeError(
             f'"{type(self).__name__}" object has no attribute "{name}"'
         )
@@ -276,6 +301,7 @@ class FrozenQwenStudent(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         num_steps: Optional[int] = None,
+        solver_method: str = "euler",
         return_dict: bool = False,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         """
@@ -285,6 +311,7 @@ class FrozenQwenStudent(nn.Module):
             input_ids: Input token IDs [batch_size, seq_len]
             attention_mask: Attention mask [batch_size, seq_len]
             num_steps: Number of iterative refinement steps (default: max_steps_T)
+            solver_method: ODE solver method ("euler", "rk4", "dopri5", etc.)
             return_dict: If True, return dict/HF-style output with hidden states
 
         Returns:
@@ -300,7 +327,7 @@ class FrozenQwenStudent(nn.Module):
                 logits = outputs.logits
 
             if return_dict:
-                return {"logits": logits}
+                return StudentOutput(logits=logits)
             return logits
         else:
             # Use num_steps or default to max_steps_T
@@ -310,33 +337,72 @@ class FrozenQwenStudent(nn.Module):
             # Extract h_start using model's forward (handles all the complexity)
             h_start = self._extract_h_start(input_ids, attention_mask)
 
-            # Run iterative midblock and track trajectory
-            trajectory = []
-            h = h_start
-            for step_id in range(num_steps):
-                h = self.midblock.forward(
-                    hidden_states=h,
-                    h_start=h_start,
-                    attention_mask=attention_mask,
-                    step_id=step_id,
-                    num_steps=num_steps,
+            # Create vector field wrapper for ODE integration
+            vector_field = MidblockVectorField(
+                midblock=self.midblock,
+                h_start=h_start,
+                attention_mask=attention_mask,
+            )
+
+            # Build solver options based on method and num_steps
+            solver_options = build_solver_options(solver_method, num_steps)
+
+            # Import torchdiffeq for ODE integration
+            try:
+                from torchdiffeq import odeint
+            except ImportError:
+                raise ImportError(
+                    "torchdiffeq is required for ODE integration. "
+                    "Install with: pip install torchdiffeq"
                 )
-                trajectory.append(h)
-            h_mid = h  # Final hidden state
+
+            # Integration time points: start at 0, end at 1
+            # Using [0, 1] normalizes inference time regardless of num_steps
+            t = torch.tensor([0.0, 1.0], device=h_start.device, dtype=h_start.dtype)
+
+            # Run ODE integration
+            # odeint returns [time_points, batch, seq, hidden]
+            solution = odeint(
+                vector_field,
+                h_start,
+                t,
+                method=solver_method,
+                options=solver_options,
+            )
+
+            # Extract final state at t=1
+            h_mid = solution[-1]
+
+            # For trajectory tracking, interpolate at each step if return_dict
+            if return_dict:
+                # Create time points for each step to capture trajectory
+                t_trajectory = torch.linspace(
+                    0, 1, num_steps + 1, device=h_start.device
+                )
+                trajectory_solution = odeint(
+                    vector_field,
+                    h_start,
+                    t_trajectory,
+                    method=solver_method,
+                    options=solver_options,
+                )
+                # Skip the initial state at t=0, take remaining steps
+                # Shape: [num_steps+1, batch, seq, hidden] -> [num_steps, batch, seq, hidden]
+                trajectory = trajectory_solution[1:]
+                # Transpose to [batch, seq, num_steps, hidden]
+                trajectory_stacked = trajectory.transpose(0, 1).transpose(1, 2)
+            else:
+                trajectory_stacked = None
 
             # Run upper layers from h_mid
             logits = self._continue_from_hidden_state(h_mid, attention_mask)
 
             if return_dict:
-                # Stack trajectory: [num_steps, batch, seq, hidden] -> [batch, seq, num_steps, hidden]
-                trajectory_stacked = (
-                    torch.stack(trajectory, dim=0).transpose(0, 1).transpose(1, 2)
+                return StudentOutput(
+                    logits=logits,
+                    endpoint_hidden=h_mid,
+                    trajectory_hidden=trajectory_stacked,
                 )
-                return {
-                    "logits": logits,
-                    "endpoint_hidden": h_mid,
-                    "trajectory_hidden": trajectory_stacked,
-                }
             else:
                 return logits
 

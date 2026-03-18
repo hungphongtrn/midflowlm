@@ -58,11 +58,13 @@ class TestStudentQwenImports:
     def test_import_student_qwen(self):
         """Test that src.model.student_qwen exists and can be imported."""
         from src.model import student_qwen
+
         assert student_qwen is not None
 
     def test_import_frozen_qwen_student(self):
         """Test that FrozenQwenStudent class exists."""
         from src.model.student_qwen import FrozenQwenStudent
+
         assert FrozenQwenStudent is not None
 
 
@@ -117,7 +119,9 @@ class TestTrainableParameters:
         # Check that base model parameters are frozen
         for name, param in student.named_parameters():
             if "model." in name and "midblock" not in name:
-                assert not param.requires_grad, f"Qwen parameter should be frozen: {name}"
+                assert not param.requires_grad, (
+                    f"Qwen parameter should be frozen: {name}"
+                )
 
     def test_midblock_parameters_trainable(self, model_config, device):
         """Test that midblock parameters have requires_grad=True."""
@@ -136,7 +140,9 @@ class TestTrainableParameters:
         for name, param in student.named_parameters():
             if "midblock" in name:
                 midblock_params_found = True
-                assert param.requires_grad, f"Midblock parameter should be trainable: {name}"
+                assert param.requires_grad, (
+                    f"Midblock parameter should be trainable: {name}"
+                )
 
         assert midblock_params_found, "No midblock parameters found"
 
@@ -144,7 +150,9 @@ class TestTrainableParameters:
 class TestBypassMode:
     """Test that bypass mode reproduces teacher outputs."""
 
-    def test_bypass_mode_outputs_match_teacher(self, model_config, device, sample_input):
+    def test_bypass_mode_outputs_match_teacher(
+        self, model_config, device, sample_input
+    ):
         """Test that bypass mode produces same outputs as teacher."""
         from src.model.student_qwen import FrozenQwenStudent
         from src.model.qwen_parity import QwenInspector
@@ -294,7 +302,9 @@ class TestVariableT:
         assert output.shape[0] == input_ids.shape[0]
         assert output.shape[1] == input_ids.shape[1]
 
-    def test_num_steps_can_exceed_max_for_inference(self, model_config, device, sample_input):
+    def test_num_steps_can_exceed_max_for_inference(
+        self, model_config, device, sample_input
+    ):
         """Test that num_steps can exceed max_steps_T for inference flexibility."""
         from src.model.student_qwen import FrozenQwenStudent
 
@@ -312,6 +322,100 @@ class TestVariableT:
         output = student(input_ids, attention_mask, num_steps=8)
         assert output.shape[0] == input_ids.shape[0]
         assert output.shape[1] == input_ids.shape[1]
+
+
+class TestODESolverIntegration:
+    """Test ODE solver integration in student model."""
+
+    def test_solver_method_euler(self, model_config, device, sample_input):
+        """Test that solver_method='euler' works."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        # Run with explicit solver method
+        output = student(input_ids, attention_mask, num_steps=8, solver_method="euler")
+        assert output.shape[:2] == input_ids.shape
+        # Shape should be [batch, seq, vocab_size]
+        assert output.dim() == 3
+
+    def test_solver_method_rk4(self, model_config, device, sample_input):
+        """Test that solver_method='rk4' works."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        # Run with RK4 solver
+        output = student(input_ids, attention_mask, num_steps=8, solver_method="rk4")
+        assert output.shape[:2] == input_ids.shape
+        assert output.dim() == 3
+
+    def test_num_steps_100_with_euler(self, model_config, device, sample_input):
+        """Test running with many steps and euler method."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=8,
+            device=device,
+        )
+
+        # Run with 100 steps - should work with proper step_size
+        output = student(
+            input_ids, attention_mask, num_steps=100, solver_method="euler"
+        )
+        assert output.shape[:2] == input_ids.shape
+        assert output.dim() == 3
+
+    def test_ode_solver_with_return_dict(self, model_config, device, sample_input):
+        """Test ODE solver with return_dict=True returns trajectory."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=4,
+            device=device,
+        )
+
+        # Run with return_dict to get trajectory
+        output = student(
+            input_ids,
+            attention_mask,
+            num_steps=4,
+            solver_method="euler",
+            return_dict=True,
+        )
+
+        assert "logits" in output
+        assert "endpoint_hidden" in output
+        assert "trajectory_hidden" in output
+        assert output["logits"].shape[:2] == input_ids.shape
+        # Trajectory should have shape [batch, seq, num_steps, hidden]
+        assert output["trajectory_hidden"].shape[2] == 4  # num_steps
 
 
 class TestHFOutputCompatibility:

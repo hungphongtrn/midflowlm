@@ -13,6 +13,7 @@ from .student_qwen import (
     FrozenQwenStudent,
     StudentOutput,
 )
+from .ode import MidblockVectorField, build_solver_options
 
 __all__ = [
     "QwenInspector",
@@ -26,4 +27,6 @@ __all__ = [
     "BoundaryConditioningAdapter",
     "FrozenQwenStudent",
     "StudentOutput",
+    "MidblockVectorField",
+    "build_solver_options",
 ]
