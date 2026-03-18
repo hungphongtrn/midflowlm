@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.teacher_cache import (
     TeacherCacheWriter,
-    generate_sample_cache,
+    generate_batch_cache,
     load_metadata,
 )
 from src.data.tinystories import get_tinystories_dataloaders
@@ -47,6 +47,7 @@ def load_config(config_path: str) -> dict:
 
 def create_namespace(config: dict) -> argparse.Namespace:
     """Convert config dict to Namespace for compatibility with existing code."""
+
     class ConfigNamespace:
         pass
 
@@ -65,21 +66,175 @@ def create_namespace(config: dict) -> argparse.Namespace:
     return ns
 
 
-def build_cache(
+def build_cache_for_split(
+    config_dict: dict,
+    config: argparse.Namespace,
+    split: str,
+    cache_dir: str,
+    store_logits: bool,
+    model_name: str,
+    model_revision: Optional[str],
+    start_layer: int,
+    end_layer: int,
+    seq_len: int,
+    overwrite: bool,
+    device: str,
+    batch_size: int,
+    limit: Optional[int],
+) -> int:
+    """Build teacher cache for a specific split.
+
+    Args:
+        config_dict: Raw configuration dictionary
+        config: Config namespace
+        split: Dataset split to cache (train/val/test)
+        cache_dir: Base cache directory
+        store_logits: Whether to store logits
+        model_name: Name of the teacher model
+        model_revision: Model revision/commit hash
+        start_layer: First layer of replacement span
+        end_layer: Last layer of replacement span
+        seq_len: Sequence length
+        overwrite: Whether to overwrite existing cache
+        device: Device for inference
+        batch_size: Batch size for processing
+        limit: Maximum number of samples to cache
+
+    Returns:
+        Number of samples cached
+    """
+    from src.data.teacher_cache import resolve_split_cache_dir
+
+    # Resolve split-specific cache directory
+    split_cache_dir = resolve_split_cache_dir(cache_dir, split)
+
+    logger.info(f"Building teacher cache for {model_name}")
+    logger.info(f"  Span: layers {start_layer}-{end_layer}")
+    logger.info(f"  Cache dir: {split_cache_dir}")
+    logger.info(f"  Store logits: {store_logits}")
+    logger.info(f"  Split: {split}")
+    if limit:
+        logger.info(f"  Limit: {limit} samples")
+
+    # Initialize cache writer for this split
+    writer = TeacherCacheWriter(
+        cache_dir=split_cache_dir,
+        model_name=model_name,
+        start_layer=start_layer,
+        end_layer=end_layer,
+        seq_len=seq_len,
+        store_logits=store_logits,
+        model_revision=model_revision,
+        overwrite=overwrite,
+    )
+
+    # Check if cache already exists
+    try:
+        existing_metadata = load_metadata(split_cache_dir)
+        logger.info(
+            f"Found existing cache with {existing_metadata.num_samples} samples"
+        )
+        if not overwrite:
+            logger.info("Use --overwrite to rebuild cache")
+            return existing_metadata.num_samples
+    except FileNotFoundError:
+        pass
+
+    # Initialize teacher inspector
+    logger.info("Loading teacher model...")
+    inspector = QwenInspector(
+        model_name=model_name,
+        start_layer=start_layer,
+        end_layer=end_layer,
+        device=device,
+        dtype=torch.float32,
+    )
+
+    # Get dataloaders
+    logger.info("Loading dataset...")
+    dataloaders = get_tinystories_dataloaders(
+        config=config,
+        batch_size=batch_size,
+    )
+
+    if split not in dataloaders:
+        raise ValueError(
+            f"Split '{split}' not found. Available: {list(dataloaders.keys())}"
+        )
+
+    dataloader = dataloaders[split]
+
+    # Process samples
+    num_samples = 0
+    num_shards = limit if limit else len(dataloader.dataset)
+
+    logger.info(f"Processing {num_shards} samples...")
+
+    for batch_idx, batch in enumerate(tqdm(dataloader, desc="Caching samples")):
+        # Check if we've reached the limit before processing
+        if limit and num_samples >= limit:
+            break
+
+        # Calculate how many samples to process from this batch
+        batch_size_actual = batch["input_ids"].shape[0]
+        if limit:
+            remaining = limit - num_samples
+            if remaining <= 0:
+                break
+            if remaining < batch_size_actual:
+                # Truncate batch to only process remaining samples
+                batch = {
+                    "input_ids": batch["input_ids"][:remaining],
+                    "attention_mask": batch["attention_mask"][:remaining],
+                }
+                batch_size_actual = remaining
+
+        # Generate cache for the entire batch at once (leverages GPU parallelism)
+        try:
+            cache_list = generate_batch_cache(
+                batch=batch,
+                inspector=inspector,
+                device=device,
+                store_logits=store_logits,
+            )
+
+            # Write each sample from the batch
+            for cache_data in cache_list:
+                writer.write_shard(
+                    sample_data=cache_data,
+                    shard_idx=num_samples,
+                    num_shards=num_shards,
+                )
+                num_samples += 1
+
+        except Exception as e:
+            logger.error(f"Error processing batch {batch_idx}: {e}")
+            raise
+
+    # Write metadata
+    writer.write_metadata(num_samples=num_samples)
+
+    logger.info(f"Cache build complete for {split}: {num_samples} samples cached")
+    logger.info(f"Cache location: {split_cache_dir}")
+
+    return num_samples
+
+
+def build_cache_with_split(
     config_path: str,
-    split: str = "train",
+    val_split_ratio: float = 0.05,
     limit: Optional[int] = None,
     batch_size: int = 1,
     overwrite: bool = False,
     device: Optional[str] = None,
 ) -> None:
-    """Build teacher cache for the specified configuration.
-    
+    """Build teacher cache with automatic train/val split.
+
     Args:
         config_path: Path to configuration YAML file
-        split: Dataset split to cache (train/val/test)
+        val_split_ratio: Ratio of samples to use for validation (default: 0.05)
         limit: Maximum number of samples to cache (None for all)
-        batch_size: Batch size for processing (currently only supports 1)
+        batch_size: Batch size for processing
         overwrite: Whether to overwrite existing cache
         device: Device for model inference (auto-detected if None)
     """
@@ -106,35 +261,13 @@ def build_cache(
     end_layer = config_dict["replacement_model"]["end_layer"]
     seq_len = config_dict["data"]["seq_len"]
 
-    logger.info(f"Building teacher cache for {model_name}")
+    logger.info(f"Building teacher cache with auto-split for {model_name}")
     logger.info(f"  Span: layers {start_layer}-{end_layer}")
-    logger.info(f"  Cache dir: {cache_dir}")
+    logger.info(f"  Base cache dir: {cache_dir}")
     logger.info(f"  Store logits: {store_logits}")
-    logger.info(f"  Split: {split}")
+    logger.info(f"  Val split ratio: {val_split_ratio}")
     if limit:
         logger.info(f"  Limit: {limit} samples")
-
-    # Initialize cache writer
-    writer = TeacherCacheWriter(
-        cache_dir=cache_dir,
-        model_name=model_name,
-        start_layer=start_layer,
-        end_layer=end_layer,
-        seq_len=seq_len,
-        store_logits=store_logits,
-        model_revision=model_revision,
-        overwrite=overwrite,
-    )
-
-    # Check if cache already exists
-    try:
-        existing_metadata = load_metadata(cache_dir)
-        logger.info(f"Found existing cache with {existing_metadata.num_samples} samples")
-        if not overwrite:
-            logger.info("Use --overwrite to rebuild cache")
-            return
-    except FileNotFoundError:
-        pass
 
     # Initialize teacher inspector
     logger.info("Loading teacher model...")
@@ -153,65 +286,207 @@ def build_cache(
         batch_size=batch_size,
     )
 
-    if split not in dataloaders:
-        raise ValueError(f"Split '{split}' not found. Available: {list(dataloaders.keys())}")
+    # Use 'train' split for processing and then split internally
+    if "train" not in dataloaders:
+        raise ValueError(
+            f"Split 'train' not found. Available: {list(dataloaders.keys())}"
+        )
 
-    dataloader = dataloaders[split]
+    dataloader = dataloaders["train"]
+
+    # Calculate split sizes
+    total_samples = limit if limit else len(dataloader.dataset)
+    val_samples = int(total_samples * val_split_ratio)
+    train_samples = total_samples - val_samples
+
+    logger.info(f"Total samples to process: {total_samples}")
+    logger.info(f"  Train: {train_samples}")
+    logger.info(f"  Val: {val_samples}")
+
+    # Resolve split-specific cache directories
+    from src.data.teacher_cache import resolve_split_cache_dir
+
+    train_cache_dir = resolve_split_cache_dir(cache_dir, "train")
+    val_cache_dir = resolve_split_cache_dir(cache_dir, "val")
+
+    # Initialize cache writers for each split
+    train_writer = TeacherCacheWriter(
+        cache_dir=train_cache_dir,
+        model_name=model_name,
+        start_layer=start_layer,
+        end_layer=end_layer,
+        seq_len=seq_len,
+        store_logits=store_logits,
+        model_revision=model_revision,
+        overwrite=overwrite,
+    )
+
+    val_writer = TeacherCacheWriter(
+        cache_dir=val_cache_dir,
+        model_name=model_name,
+        start_layer=start_layer,
+        end_layer=end_layer,
+        seq_len=seq_len,
+        store_logits=store_logits,
+        model_revision=model_revision,
+        overwrite=overwrite,
+    )
 
     # Process samples
-    num_samples = 0
-    num_shards = limit if limit else len(dataloader.dataset)
+    train_count = 0
+    val_count = 0
+    total_processed = 0
 
-    logger.info(f"Processing {num_shards} samples...")
+    logger.info(f"Processing {total_samples} samples...")
 
     for batch_idx, batch in enumerate(tqdm(dataloader, desc="Caching samples")):
-        if limit and batch_idx >= limit:
+        # Check if we've reached the limit before processing
+        if limit and total_processed >= limit:
             break
 
-        # Process each sample in batch (currently batch_size=1)
-        for i in range(batch["input_ids"].shape[0]):
-            sample = {
-                "input_ids": batch["input_ids"][i],
-                "attention_mask": batch["attention_mask"][i],
-            }
+        # Calculate how many samples to process from this batch
+        batch_size_actual = batch["input_ids"].shape[0]
+        if limit:
+            remaining = limit - total_processed
+            if remaining <= 0:
+                break
+            if remaining < batch_size_actual:
+                # Truncate batch to only process remaining samples
+                batch = {
+                    "input_ids": batch["input_ids"][:remaining],
+                    "attention_mask": batch["attention_mask"][:remaining],
+                }
+                batch_size_actual = remaining
 
-            # Generate cache for this sample
-            try:
-                cache_data = generate_sample_cache(
-                    sample=sample,
-                    inspector=inspector,
-                    device=device,
-                    store_logits=store_logits,
-                )
+        # Generate cache for the entire batch at once (leverages GPU parallelism)
+        try:
+            cache_list = generate_batch_cache(
+                batch=batch,
+                inspector=inspector,
+                device=device,
+                store_logits=store_logits,
+            )
 
-                # Write shard
-                writer.write_shard(
-                    sample_data=cache_data,
-                    shard_idx=num_samples,
-                    num_shards=num_shards,
-                )
+            # Write each sample from the batch to appropriate split
+            for cache_data in cache_list:
+                # First N samples go to train, rest go to val
+                if train_count < train_samples:
+                    train_writer.write_shard(
+                        sample_data=cache_data,
+                        shard_idx=train_count,
+                        num_shards=train_samples,
+                    )
+                    train_count += 1
+                else:
+                    val_writer.write_shard(
+                        sample_data=cache_data,
+                        shard_idx=val_count,
+                        num_shards=val_samples,
+                    )
+                    val_count += 1
+                total_processed += 1
 
-                num_samples += 1
+        except Exception as e:
+            logger.error(f"Error processing batch {batch_idx}: {e}")
+            raise
 
-            except Exception as e:
-                logger.error(f"Error processing sample {num_samples}: {e}")
-                raise
+    # Write metadata for each split
+    train_writer.write_metadata(num_samples=train_count)
+    val_writer.write_metadata(num_samples=val_count)
 
-    # Write metadata
-    writer.write_metadata(num_samples=num_samples)
-
-    logger.info(f"Cache build complete: {num_samples} samples cached")
-    logger.info(f"Cache location: {cache_dir}")
+    logger.info(f"Cache build complete:")
+    logger.info(f"  Train: {train_count} samples -> {train_cache_dir}")
+    logger.info(f"  Val: {val_count} samples -> {val_cache_dir}")
 
 
-def verify_cache(cache_dir: str, num_samples: int = 1) -> None:
+def build_cache(
+    config_path: str,
+    split: str = "train",
+    limit: Optional[int] = None,
+    batch_size: int = 1,
+    overwrite: bool = False,
+    device: Optional[str] = None,
+) -> None:
+    """Build teacher cache for the specified configuration.
+
+    Args:
+        config_path: Path to configuration YAML file
+        split: Dataset split to cache (train/val/test/all)
+        limit: Maximum number of samples to cache (None for all)
+        batch_size: Batch size for processing (currently only supports 1)
+        overwrite: Whether to overwrite existing cache
+        device: Device for model inference (auto-detected if None)
+    """
+    # Load configuration
+    config_dict = load_config(config_path)
+    config = create_namespace(config_dict)
+
+    # Extract cache configuration
+    cache_config = config_dict.get("teacher_cache", {})
+    val_split_ratio = cache_config.get("val_split_ratio", 0.05)
+
+    # Handle 'all' split option
+    if split == "all":
+        build_cache_with_split(
+            config_path=config_path,
+            val_split_ratio=val_split_ratio,
+            limit=limit,
+            batch_size=batch_size,
+            overwrite=overwrite,
+            device=device,
+        )
+        return
+
+    # Extract cache configuration
+    cache_dir = cache_config.get("cache_dir", "./cache/teacher_cache")
+    store_logits = cache_config.get("store_logits", True)
+
+    # Extract model configuration
+    model_name = config_dict["model"]["name"]
+    model_revision = config_dict["model"].get("revision")
+
+    # Extract replacement span configuration
+    start_layer = config_dict["replacement_model"]["start_layer"]
+    end_layer = config_dict["replacement_model"]["end_layer"]
+    seq_len = config_dict["data"]["seq_len"]
+
+    # Build cache for the specified split
+    build_cache_for_split(
+        config_dict=config_dict,
+        config=config,
+        split=split,
+        cache_dir=cache_dir,
+        store_logits=store_logits,
+        model_name=model_name,
+        model_revision=model_revision,
+        start_layer=start_layer,
+        end_layer=end_layer,
+        seq_len=seq_len,
+        overwrite=overwrite,
+        device=device if device else ("cuda" if torch.cuda.is_available() else "cpu"),
+        batch_size=batch_size,
+        limit=limit,
+    )
+
+
+def verify_cache(
+    cache_dir: str, num_samples: int = 1, split: Optional[str] = None
+) -> None:
     """Verify cache contents by loading and checking samples.
-    
+
     Args:
         cache_dir: Directory containing cache files
         num_samples: Number of samples to verify
+        split: Specific split to verify (train/val), or None to verify root cache dir
     """
-    logger.info(f"Verifying cache at {cache_dir}...")
+    from src.data.teacher_cache import resolve_split_cache_dir
+
+    # Resolve split-specific directory if split is specified
+    if split:
+        cache_dir = str(resolve_split_cache_dir(cache_dir, split))
+        logger.info(f"Verifying {split} cache at {cache_dir}...")
+    else:
+        logger.info(f"Verifying cache at {cache_dir}...")
 
     # Load metadata
     metadata = load_metadata(cache_dir)
@@ -236,7 +511,9 @@ def verify_cache(cache_dir: str, num_samples: int = 1) -> None:
             logger.info(f"Sample {i}:")
             logger.info(f"  input_ids shape: {data['input_ids'].shape}")
             logger.info(f"  h_start shape: {data['h_start'].shape}")
-            logger.info(f"  trajectory_targets count: {len(data['trajectory_targets'])}")
+            logger.info(
+                f"  trajectory_targets count: {len(data['trajectory_targets'])}"
+            )
             logger.info(f"  h_target shape: {data['h_target'].shape}")
             if "teacher_logits" in data:
                 logger.info(f"  teacher_logits shape: {data['teacher_logits'].shape}")
@@ -263,8 +540,8 @@ def main():
         "--split",
         type=str,
         default="train",
-        choices=["train", "val", "test"],
-        help="Dataset split to cache",
+        choices=["train", "val", "test", "all"],
+        help="Dataset split to cache (use 'all' to auto-split train/val)",
     )
     parser.add_argument(
         "--limit",
@@ -306,7 +583,13 @@ def main():
         # Load config to get cache_dir
         config = load_config(args.config)
         cache_dir = config["teacher_cache"]["cache_dir"]
-        verify_cache(cache_dir, num_samples=args.limit or 3)
+
+        # If split is 'all', verify both train and val splits
+        if args.split == "all":
+            verify_cache(cache_dir, num_samples=args.limit or 3, split="train")
+            verify_cache(cache_dir, num_samples=args.limit or 3, split="val")
+        else:
+            verify_cache(cache_dir, num_samples=args.limit or 3, split=args.split)
     else:
         build_cache(
             config_path=args.config,
@@ -320,7 +603,13 @@ def main():
         if args.verify:
             config = load_config(args.config)
             cache_dir = config["teacher_cache"]["cache_dir"]
-            verify_cache(cache_dir, num_samples=args.limit or 3)
+
+            # If split is 'all', verify both train and val splits
+            if args.split == "all":
+                verify_cache(cache_dir, num_samples=args.limit or 3, split="train")
+                verify_cache(cache_dir, num_samples=args.limit or 3, split="val")
+            else:
+                verify_cache(cache_dir, num_samples=args.limit or 3, split=args.split)
 
 
 if __name__ == "__main__":

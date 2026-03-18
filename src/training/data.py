@@ -6,15 +6,13 @@ This module provides:
 - Variable T sampling support
 """
 
-import json
-import random
+import re
 import torch
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 from torch.utils.data import Dataset, DataLoader, Sampler
-import numpy as np
 
-from src.data.teacher_cache import load_metadata, load_shard, resolve_split_cache_dir
+from src.data.teacher_cache import load_metadata, resolve_split_cache_dir
 
 
 class CacheDataset(Dataset):
@@ -44,6 +42,10 @@ class CacheDataset(Dataset):
         # Resolve split-specific cache directory
         self.cache_dir = resolve_split_cache_dir(self.cache_root, split)
 
+        # Fallback to root if split subdirectory doesn't exist (flat cache structure)
+        if not self.cache_dir.exists():
+            self.cache_dir = self.cache_root
+
         # Load metadata
         self.metadata = load_metadata(self.cache_dir)
         self.num_samples = self.metadata.num_samples
@@ -60,39 +62,100 @@ class CacheDataset(Dataset):
         self.sample_map = self._build_sample_map()
 
     def _find_shards(self) -> List[Path]:
-        """Find all cache shard files."""
+        """Find all cache shard files and sort by actual shard index."""
         # Look for .safetensors or .pt files
-        safetensor_shards = sorted(self.cache_dir.glob("shard_*_of_*.safetensors"))
-        pt_shards = sorted(self.cache_dir.glob("shard_*_of_*.pt"))
+        safetensor_shards = list(self.cache_dir.glob("shard_*_of_*.safetensors"))
+        pt_shards = list(self.cache_dir.glob("shard_*_of_*.pt"))
 
-        if safetensor_shards:
-            return safetensor_shards
-        return pt_shards
+        all_shards = safetensor_shards + pt_shards
+
+        if not all_shards:
+            return []
+
+        # Parse shard index from each filename and sort by it
+        # Pattern: shard_{idx}_of_{total}.ext
+        shard_with_index = []
+        for shard_path in all_shards:
+            match = re.search(r"shard_(\d+)_of_\d+\.", shard_path.name)
+            if match:
+                shard_idx = int(match.group(1))
+                shard_with_index.append((shard_idx, shard_path))
+
+        # Sort by shard index
+        shard_with_index.sort(key=lambda x: x[0])
+
+        # Extract sorted paths
+        shards = [path for _, path in shard_with_index]
+
+        return shards
 
     def _build_sample_map(self) -> List[tuple]:
         """Build mapping from global sample index to (shard_idx, local_idx)."""
         sample_map = []
+        samples_per_shard = self._get_samples_per_shard()
 
-        for shard_idx in range(len(self.shards)):
-            # Load shard to determine number of samples using shared loader
-            shard_data = load_shard(
-                self.cache_dir,
-                shard_idx=shard_idx,
-                num_shards=len(self.shards),
-                device="cpu",
-            )
-            if "input_ids" in shard_data:
-                num_samples_in_shard = shard_data["input_ids"].shape[0]
-            elif "h_start" in shard_data:
-                num_samples_in_shard = shard_data["h_start"].shape[0]
-            else:
-                # Fallback: assume single sample per shard
-                num_samples_in_shard = 1
-
+        for shard_idx, num_samples_in_shard in enumerate(samples_per_shard):
             for local_idx in range(num_samples_in_shard):
                 sample_map.append((shard_idx, local_idx))
 
         return sample_map
+
+    def _get_samples_per_shard(self) -> List[int]:
+        """Infer shard sample counts from metadata instead of shard payloads."""
+        num_shards = len(self.shards)
+        metadata_counts = getattr(self.metadata, "samples_per_shard", None)
+
+        if metadata_counts is not None:
+            if len(metadata_counts) != num_shards:
+                raise ValueError(
+                    "Metadata samples_per_shard length does not match shard count"
+                )
+            if sum(metadata_counts) != self.num_samples:
+                raise ValueError(
+                    "Metadata samples_per_shard total does not match num_samples"
+                )
+            return metadata_counts
+
+        # Distribute samples evenly across shards
+        base_samples, remainder = divmod(self.num_samples, num_shards)
+        return [
+            base_samples + (1 if shard_idx < remainder else 0)
+            for shard_idx in range(num_shards)
+        ]
+
+    def _load_shard_by_path(
+        self, shard_path: Path, device: str = "cpu"
+    ) -> Dict[str, Any]:
+        """Load a shard directly from its file path.
+
+        Args:
+            shard_path: Path to the shard file
+            device: Device to load tensors to
+
+        Returns:
+            Dictionary with loaded tensors
+        """
+        from src.data.teacher_cache import HAS_SAFETENSORS
+
+        # Try safetensors first, then .pt fallback
+        if shard_path.suffix == ".safetensors" and HAS_SAFETENSORS:
+            from safetensors.torch import load_file
+
+            loaded = cast(Dict[str, Any], load_file(str(shard_path)))
+        else:
+            loaded = cast(Dict[str, Any], torch.load(shard_path, map_location=device))
+
+        # Reconstruct trajectory_targets list
+        if "num_trajectory_targets" in loaded:
+            num_targets = int(loaded["num_trajectory_targets"].item())
+            trajectory_targets = []
+            for i in range(num_targets):
+                key = f"trajectory_target_{i}"
+                if key in loaded:
+                    trajectory_targets.append(loaded[key])
+            loaded["trajectory_targets"] = trajectory_targets
+
+        return loaded
 
     def __len__(self) -> int:
         return len(self.sample_map)
@@ -108,32 +171,48 @@ class CacheDataset(Dataset):
         """
         shard_idx, local_idx = self.sample_map[idx]
 
-        # Load shard using shared loader (reconstructs trajectory_targets)
-        shard_data = load_shard(
-            self.cache_dir,
-            shard_idx=shard_idx,
-            num_shards=len(self.shards),
-            device="cpu",
-        )
+        # Load shard by filename directly (handles mixed naming patterns)
+        shard_path = self.shards[shard_idx]
+        shard_data = self._load_shard_by_path(shard_path, device="cpu")
 
-        # Extract single sample from batch
+        # Extract single sample from batch (or use full shard if no batch dim)
         sample = {}
 
         if "input_ids" in shard_data:
-            sample["input_ids"] = shard_data["input_ids"][local_idx]
+            input_ids = shard_data["input_ids"]
+            if input_ids.dim() == 1:
+                # No batch dimension, use full tensor
+                sample["input_ids"] = input_ids
+            else:
+                # Has batch dimension, index it
+                sample["input_ids"] = input_ids[local_idx]
 
         if "attention_mask" in shard_data:
-            sample["attention_mask"] = shard_data["attention_mask"][local_idx]
+            attention_mask = shard_data["attention_mask"]
+            if attention_mask.dim() == 1:
+                sample["attention_mask"] = attention_mask
+            else:
+                sample["attention_mask"] = attention_mask[local_idx]
 
         if "h_start" in shard_data:
-            sample["h_start"] = shard_data["h_start"][local_idx]
+            h_start = shard_data["h_start"]
+            if h_start.dim() == 2:
+                # [seq_len, hidden]: no batch dim
+                sample["h_start"] = h_start
+            else:
+                # [batch, seq_len, hidden]: index it
+                sample["h_start"] = h_start[local_idx]
 
         if "h_target" in shard_data:
-            sample["h_target"] = shard_data["h_target"][local_idx]
+            h_target = shard_data["h_target"]
+            if h_target.dim() == 2:
+                sample["h_target"] = h_target
+            else:
+                sample["h_target"] = h_target[local_idx]
 
-        # trajectory_targets is already reconstructed by load_shard
+        # trajectory_targets is already reconstructed by _load_shard_by_path
         if "trajectory_targets" in shard_data:
-            trajectory_list = shard_data["trajectory_targets"]
+            trajectory_list = cast(List[torch.Tensor], shard_data["trajectory_targets"])
             if trajectory_list:
                 # Stack to [depth, seq, hidden] then transpose to [seq, depth, hidden]
                 sample["trajectory_targets"] = torch.stack(
@@ -142,7 +221,13 @@ class CacheDataset(Dataset):
 
         # teacher_logits is optional - only include if present
         if "teacher_logits" in shard_data:
-            sample["teacher_logits"] = shard_data["teacher_logits"][local_idx]
+            teacher_logits = shard_data["teacher_logits"]
+            if teacher_logits.dim() == 2:
+                # [seq_len, vocab]: no batch dim
+                sample["teacher_logits"] = teacher_logits
+            else:
+                # [batch, seq_len, vocab]: index it
+                sample["teacher_logits"] = teacher_logits[local_idx]
 
         return sample
 

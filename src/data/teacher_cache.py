@@ -68,6 +68,7 @@ class CacheMetadata:
     seq_len: int
     store_logits: bool = False
     num_samples: int = 0
+    samples_per_shard: Optional[List[int]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert metadata to dictionary."""
@@ -300,6 +301,61 @@ def generate_sample_cache(
         )  # Remove batch dim
 
     return cache_data
+
+
+def generate_batch_cache(
+    batch: Dict[str, torch.Tensor],
+    inspector: QwenInspector,
+    device: str = "cpu",
+    store_logits: bool = False,
+) -> List[Dict[str, Any]]:
+    """Generate cache data for a batch of samples efficiently.
+
+    This function processes the entire batch at once to leverage GPU parallelism,
+    then splits the results into individual sample caches.
+
+    Args:
+        batch: Dictionary with input_ids and attention_mask (batched)
+        inspector: QwenInspector instance for extracting teacher outputs
+        device: Device to run inference on
+        store_logits: Whether to store teacher logits
+
+    Returns:
+        List of cache dictionaries, one per sample in the batch
+    """
+    input_ids = batch["input_ids"].to(device)
+    attention_mask = batch["attention_mask"].to(device)
+
+    # Ensure batch dimension exists
+    if input_ids.ndim == 1:
+        input_ids = input_ids.unsqueeze(0)
+        attention_mask = attention_mask.unsqueeze(0)
+
+    batch_size = input_ids.shape[0]
+
+    # Extract all teacher outputs for the entire batch at once
+    outputs = inspector.extract_all(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+    )
+
+    # Split results into individual samples
+    cache_list = []
+    for i in range(batch_size):
+        cache_data = {
+            "input_ids": batch["input_ids"][i].cpu(),
+            "attention_mask": batch["attention_mask"][i].cpu(),
+            "h_start": outputs["h_start"][i].cpu(),
+            "trajectory_targets": [s[i].cpu() for s in outputs["span_states"]],
+            "h_target": outputs["h_target"][i].cpu(),
+        }
+
+        if store_logits:
+            cache_data["teacher_logits"] = outputs["logits"][i].cpu()
+
+        cache_list.append(cache_data)
+
+    return cache_list
 
 
 def load_shard(

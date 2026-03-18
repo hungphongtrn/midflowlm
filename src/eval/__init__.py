@@ -12,6 +12,7 @@ from src.eval.baselines import (
     compute_latency_metrics,
     compute_stability_metrics,
 )
+from src.eval.text_checkpoint_sweep import run_text_sweep
 
 __all__ = [
     "IdentityBaseline",
@@ -24,4 +25,5 @@ __all__ = [
     "compute_perplexity",
     "compute_latency_metrics",
     "compute_stability_metrics",
+    "run_text_sweep",
 ]

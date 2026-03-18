@@ -43,9 +43,10 @@ replacement_model:
 teacher_cache:
   enabled: true
   cache_dir: "./cache/tinystories_qwen_boundary_states"
-  store_logits: true
+  store_logits: false
   store_hidden_states: true
   overwrite: false
+  val_split_ratio: 0.05
 
 data:
   dataset_name: "roneneldan/TinyStories"
@@ -55,6 +56,7 @@ data:
   train_samples: 20000
   val_samples: 1000
   test_samples: 1000
+  batch_size: 8
   num_workers: 4
   pin_memory: true
   persistent_workers: true
@@ -63,7 +65,7 @@ data:
 loss:
   endpoint_weight: 1.0
   trajectory_weight: 1.0
-  kl_weight: 0.25
+  kl_weight: 0.0
   ce_weight: 0.0
   mask_padding_tokens: true
 

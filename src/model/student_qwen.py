@@ -38,7 +38,9 @@ class StudentOutput(dict):
     def __getattr__(self, name: str) -> Any:
         if name == "logits":
             return self._logits
-        raise AttributeError(f"\"{type(self).__name__}\" object has no attribute \"{name}\"")
+        raise AttributeError(
+            f'"{type(self).__name__}" object has no attribute "{name}"'
+        )
 
     def __repr__(self) -> str:
         return f"StudentOutput(logits={self._logits.shape})"
@@ -104,22 +106,28 @@ class FrozenQwenStudent(nn.Module):
         self.config = AutoConfig.from_pretrained(model_name)
 
         # Get number of layers
-        if hasattr(self.config, 'num_hidden_layers'):
+        if hasattr(self.config, "num_hidden_layers"):
             self.num_layers = self.config.num_hidden_layers
-        elif hasattr(self.config, 'num_layers'):
+        elif hasattr(self.config, "num_layers"):
             self.num_layers = self.config.num_layers
-        elif hasattr(self.config, 'text_config') and hasattr(self.config.text_config, 'num_hidden_layers'):
+        elif hasattr(self.config, "text_config") and hasattr(
+            self.config.text_config, "num_hidden_layers"
+        ):
             self.num_layers = self.config.text_config.num_hidden_layers
-        elif hasattr(self.config, 'text_config') and hasattr(self.config.text_config, 'num_layers'):
+        elif hasattr(self.config, "text_config") and hasattr(
+            self.config.text_config, "num_layers"
+        ):
             self.num_layers = self.config.text_config.num_layers
         else:
-            raise AttributeError("Config has no num_hidden_layers or num_layers attribute")
+            raise AttributeError(
+                "Config has no num_hidden_layers or num_layers attribute"
+            )
 
         # Validate layer indices
         if start_layer < 0 or end_layer >= self.num_layers:
             raise ValueError(
                 f"Invalid layer range: start_layer={start_layer}, end_layer={end_layer}, "
-                f"but model only has {self.num_layers} layers (0-{self.num_layers-1})"
+                f"but model only has {self.num_layers} layers (0-{self.num_layers - 1})"
             )
 
         # Load the full Qwen model
@@ -136,19 +144,23 @@ class FrozenQwenStudent(nn.Module):
             self.model.eval()
 
             # Get hidden size from config
-            if hasattr(self.config, 'hidden_size'):
+            if hasattr(self.config, "hidden_size"):
                 hidden_size = self.config.hidden_size
-            elif hasattr(self.config, 'text_config') and hasattr(self.config.text_config, 'hidden_size'):
+            elif hasattr(self.config, "text_config") and hasattr(
+                self.config.text_config, "hidden_size"
+            ):
                 hidden_size = self.config.text_config.hidden_size
             else:
                 raise AttributeError("Config has no hidden_size attribute")
 
             # Get number of heads for attention
-            if hasattr(self.config, 'num_attention_heads'):
+            if hasattr(self.config, "num_attention_heads"):
                 num_heads = self.config.num_attention_heads
-            elif hasattr(self.config, 'num_heads'):
+            elif hasattr(self.config, "num_heads"):
                 num_heads = self.config.num_heads
-            elif hasattr(self.config, 'text_config') and hasattr(self.config.text_config, 'num_attention_heads'):
+            elif hasattr(self.config, "text_config") and hasattr(
+                self.config.text_config, "num_attention_heads"
+            ):
                 num_heads = self.config.text_config.num_attention_heads
             else:
                 num_heads = 8  # Default for Qwen3.5-0.8B
@@ -178,9 +190,9 @@ class FrozenQwenStudent(nn.Module):
 
     def _get_base_model(self) -> nn.Module:
         """Get the base model (handles different HF model structures)."""
-        if hasattr(self.model, 'model'):
+        if hasattr(self.model, "model"):
             return self.model.model
-        elif hasattr(self.model, 'transformer'):
+        elif hasattr(self.model, "transformer"):
             return self.model.transformer
         else:
             return self.model
@@ -237,7 +249,7 @@ class FrozenQwenStudent(nn.Module):
             base_model = self._get_base_model()
 
             # Get the layers module
-            if hasattr(base_model, 'layers'):
+            if hasattr(base_model, "layers"):
                 layers = base_model.layers
             else:
                 raise AttributeError("Cannot find layers module in base model")
@@ -273,10 +285,10 @@ class FrozenQwenStudent(nn.Module):
             input_ids: Input token IDs [batch_size, seq_len]
             attention_mask: Attention mask [batch_size, seq_len]
             num_steps: Number of iterative refinement steps (default: max_steps_T)
-            return_dict: If True, return dict/HF-style output
+            return_dict: If True, return dict/HF-style output with hidden states
 
         Returns:
-            Logits tensor or StudentOutput/ dict depending on return_dict
+            Logits tensor or dict with logits, endpoint_hidden, trajectory_hidden
         """
         if self.bypass_mode:
             # In bypass mode, just run the full model
@@ -286,6 +298,10 @@ class FrozenQwenStudent(nn.Module):
                     attention_mask=attention_mask,
                 )
                 logits = outputs.logits
+
+            if return_dict:
+                return {"logits": logits}
+            return logits
         else:
             # Use num_steps or default to max_steps_T
             if num_steps is None:
@@ -294,22 +310,35 @@ class FrozenQwenStudent(nn.Module):
             # Extract h_start using model's forward (handles all the complexity)
             h_start = self._extract_h_start(input_ids, attention_mask)
 
-            # Run iterative midblock
-            h_mid = self.midblock.iterative_refinement(
-                h_start=h_start,
-                num_steps=num_steps,
-                attention_mask=attention_mask,
-            )
+            # Run iterative midblock and track trajectory
+            trajectory = []
+            h = h_start
+            for step_id in range(num_steps):
+                h = self.midblock.forward(
+                    hidden_states=h,
+                    h_start=h_start,
+                    attention_mask=attention_mask,
+                    step_id=step_id,
+                    num_steps=num_steps,
+                )
+                trajectory.append(h)
+            h_mid = h  # Final hidden state
 
             # Run upper layers from h_mid
-            # We need to construct a forward that starts from h_mid
             logits = self._continue_from_hidden_state(h_mid, attention_mask)
 
-        if return_dict:
-            # Return StudentOutput which supports both dict and attribute access
-            return StudentOutput(logits=logits)
-        else:
-            return logits
+            if return_dict:
+                # Stack trajectory: [num_steps, batch, seq, hidden] -> [batch, seq, num_steps, hidden]
+                trajectory_stacked = (
+                    torch.stack(trajectory, dim=0).transpose(0, 1).transpose(1, 2)
+                )
+                return {
+                    "logits": logits,
+                    "endpoint_hidden": h_mid,
+                    "trajectory_hidden": trajectory_stacked,
+                }
+            else:
+                return logits
 
     def _continue_from_hidden_state(
         self,
@@ -333,16 +362,20 @@ class FrozenQwenStudent(nn.Module):
 
         with torch.no_grad():
             # Get the layers module
-            if hasattr(base_model, 'layers'):
+            if hasattr(base_model, "layers"):
                 layers = base_model.layers
             else:
                 raise AttributeError("Cannot find layers module in base model")
 
             # Compute position embeddings if needed (Qwen3.5)
             position_embeddings = None
-            if hasattr(base_model, 'rotary_emb'):
+            if hasattr(base_model, "rotary_emb"):
                 batch_size, seq_len, _ = hidden_states.shape
-                position_ids = torch.arange(seq_len, device=hidden_states.device).unsqueeze(0).expand(batch_size, -1)
+                position_ids = (
+                    torch.arange(seq_len, device=hidden_states.device)
+                    .unsqueeze(0)
+                    .expand(batch_size, -1)
+                )
                 position_embeddings = base_model.rotary_emb(hidden_states, position_ids)
 
             # Manually run through layers end_layer+1 to num_layers-1
@@ -352,6 +385,7 @@ class FrozenQwenStudent(nn.Module):
 
                 # Build layer kwargs based on signature
                 import inspect
+
                 sig = inspect.signature(layer.forward)
                 layer_kwargs = {"hidden_states": h}
 
@@ -361,7 +395,10 @@ class FrozenQwenStudent(nn.Module):
                 #    the layer's expected format and causes shape mismatches
                 # 3. For training, causal masking is typically what we want
 
-                if 'position_embeddings' in sig.parameters and position_embeddings is not None:
+                if (
+                    "position_embeddings" in sig.parameters
+                    and position_embeddings is not None
+                ):
                     layer_kwargs["position_embeddings"] = position_embeddings
 
                 # Use layer.forward directly to avoid shape issues with __call__
@@ -371,13 +408,13 @@ class FrozenQwenStudent(nn.Module):
                 h = layer_output[0] if isinstance(layer_output, tuple) else layer_output
 
             # Apply final norm if it exists
-            if hasattr(base_model, 'norm'):
+            if hasattr(base_model, "norm"):
                 h = base_model.norm(h)
 
             # Apply LM head
-            if hasattr(self.model, 'lm_head'):
+            if hasattr(self.model, "lm_head"):
                 logits = self.model.lm_head(h)
-            elif hasattr(base_model, 'lm_head'):
+            elif hasattr(base_model, "lm_head"):
                 logits = base_model.lm_head(h)
             else:
                 # Last resort: try to get lm_head from the model
