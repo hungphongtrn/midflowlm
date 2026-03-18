@@ -492,35 +492,63 @@ git commit -m "feat: add ODE solver sweep controls and repetition metrics"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-03-18-continuous-ode-flow-midblock.md`
 
-- [ ] **Step 1: Run the focused model and training suites**
+- [x] **Step 1: Run the focused model and training suites**
 
 Run: `python -m pytest tests/test_continuous_time_embedding.py tests/test_midblock.py tests/test_ode_integration.py tests/test_student_qwen.py tests/test_teacher_cache.py tests/test_losses.py tests/test_train_smoke.py tests/test_eval_pipeline.py -v`
 Expected: PASS.
+**Result:** PASSED (170 tests in 94.41s)
 
-- [ ] **Step 2: Run a cache-build smoke test**
+- [x] **Step 2: Run a cache-build smoke test**
 
 Run: `python scripts/build_teacher_cache.py --config configs/v0_onemotif.yaml --limit 8 --split train --overwrite --verify`
 Expected: PASS with velocity-target metadata and readable shards.
+**Result:** PASSED
+- Metadata shows `target_type: velocity`
+- Training rule: `h_t = h_start + t[:, None, None] * velocity_target`
+- All 8 samples verified with correct velocity_target computation
 
-- [ ] **Step 3: Run a training smoke test**
+- [x] **Step 3: Run a training smoke test**
 
 Run: `python scripts/train_v0.py --config configs/v0_onemotif.yaml --fast-dev-run`
 Expected: PASS with non-NaN `velocity_loss`, checkpoint write, and logged evidence that `h_t = h_start + t * velocity_target` is used for sampled `t` values beyond only `0.0`.
+**Result:** PASSED
+- `velocity_loss`: 0.001650773803703487 (non-NaN)
+- `t_mean`: 0.5685 (sampled intermediate times, not just 0.0)
+- `t_std`: 0.2417 (proper variance in sampling)
+- Train parameters: trainable=22,030,336, frozen=752,393,024
+- Val step also passed: velocity_loss=0.0015741095412522554
 
-- [ ] **Step 4: Verify checkpoint reload and parameter counts still work**
+- [x] **Step 4: Verify checkpoint reload and parameter counts still work**
 
 Run: `python -m pytest tests/test_student_qwen.py -k "ParameterCounts or state_dict" -v`
 Expected: PASS, confirming the refactor did not break save/load compatibility or frozen/trainable count reporting.
+**Result:** PASSED (2 tests)
 
-- [ ] **Step 5: Run the solver normalization check**
+- [x] **Step 5: Run the solver normalization check**
 
 Run: `python -m pytest tests/test_ode_integration.py -k euler_solver_normalizes_dt_between_one_and_many_steps -v`
 Expected: PASS.
+**Result:** PASSED (1 test)
 
-- [ ] **Step 6: Record the actual command matrix in the plan notes if any command differs from this draft**
+- [x] **Step 6: Record the actual command matrix in the plan notes if any command differs from this draft**
 
-```text
-Update the plan file with the exact smoke-test commands that proved the implementation.
+Actual commands used (commands unchanged from draft, executed with system Python via `.venv/bin/python`):
+```bash
+# Step 1: Test suite
+/home/hungphongtrn/Workspace/midflowlm/.venv/bin/python -m pytest tests/test_continuous_time_embedding.py tests/test_midblock.py tests/test_ode_integration.py tests/test_student_qwen.py tests/test_teacher_cache.py tests/test_losses.py tests/test_train_smoke.py tests/test_eval_pipeline.py -v
+
+# Step 2: Cache build
+/home/hungphongtrn/Workspace/midflowlm/.venv/bin/python scripts/build_teacher_cache.py --config configs/v0_onemotif.yaml --limit 8 --split train --overwrite --verify
+/home/hungphongtrn/Workspace/midflowlm/.venv/bin/python scripts/build_teacher_cache.py --config configs/v0_onemotif.yaml --limit 8 --split val --overwrite
+
+# Step 3: Training smoke test
+/home/hungphongtrn/Workspace/midflowlm/.venv/bin/python scripts/train_v0.py --config configs/v0_onemotif.yaml --fast-dev-run
+
+# Step 4: Parameter counts
+/home/hungphongtrn/Workspace/midflowlm/.venv/bin/python -m pytest tests/test_student_qwen.py -k "ParameterCounts or state_dict" -v
+
+# Step 5: Solver normalization
+/home/hungphongtrn/Workspace/midflowlm/.venv/bin/python -m pytest tests/test_ode_integration.py -k euler_solver_normalizes_dt_between_one_and_many_steps -v
 ```
 
 - [ ] **Step 7: Commit**
@@ -548,10 +576,26 @@ git commit -m "docs: finalize continuous ODE flow midblock verification plan"
 ## Go / no-go rule
 
 Do not trust the refactor until all of the following are true:
-- `torchdiffeq` is the active inference path.
-- No model test passes an integer `step_id` into the refactored midblock.
-- Teacher cache metadata says `target_type = velocity`.
-- Training logs report `velocity_loss` instead of endpoint / trajectory loss as the primary architecture objective.
-- Training uses sampled intermediate states `h_t = h_start + t * velocity_target`, not only the boundary state `h_start`.
-- Sweep outputs for `num_steps` in `[4, 8, 16, 32, 64]` are generated for both `euler` and `rk4`.
-- Repetition metrics stop worsening monotonically as `num_steps` grows beyond the old training maximum.
+- [x] `torchdiffeq` is the active inference path
+- [x] No model test passes an integer `step_id` into the refactored midblock
+- [x] Teacher cache metadata says `target_type = velocity`
+- [x] Training logs report `velocity_loss` instead of endpoint / trajectory loss
+- [x] Training uses sampled intermediate states `h_t = h_start + t * velocity_target`
+- [ ] Sweep outputs for `num_steps` in `[4, 8, 16, 32, 64]` are generated for both `euler` and `rk4`
+- [ ] Repetition metrics stop worsening monotonically as `num_steps` grows beyond the old training maximum
+
+## Verification Status (2026-03-19)
+
+**All implemented tasks verified:**
+- Task 1 (Config) ✓
+- Task 2 (Time embeddings) ✓
+- Task 3 (FlowMidblock velocity predictor) ✓
+- Task 4 (ODE integration) ✓
+- Task 5 (Cache velocity targets) ✓
+- Task 6 (Training velocity loss) ✓
+- Task 7 (Evaluation updates) ✓
+- Task 8 (End-to-end verification) ✓
+
+**Remaining for full production readiness:**
+- Run full text sweep with checkpoint after training completes
+- Compare solver method behaviors at different num_steps
