@@ -68,8 +68,9 @@ data:
   shuffle_seed: 1337
 
 loss:
-  endpoint_weight: 1.0
-  trajectory_weight: 1.0
+  velocity_weight: 1.0
+  endpoint_weight: 0.0
+  trajectory_weight: 0.0
   kl_weight: 0.0
   ce_weight: 0.0
   mask_padding_tokens: true

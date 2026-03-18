@@ -28,8 +28,9 @@ class TestArchitectureLossContract:
 
         config = {
             "loss": {
-                "endpoint_weight": 1.0,
-                "trajectory_weight": 1.0,
+                "velocity_weight": 1.0,
+                "endpoint_weight": 0.0,
+                "trajectory_weight": 0.0,
                 "kl_weight": 0.0,
                 "ce_weight": 0.0,
                 "mask_padding_tokens": True,
@@ -46,6 +47,7 @@ class TestArchitectureLossContract:
 
         loss_fn = DistillationLoss(
             LossConfig(
+                velocity_weight=0.0,
                 endpoint_weight=1.0,
                 trajectory_weight=1.0,
                 kl_weight=0.25,
@@ -67,9 +69,7 @@ class TestArchitectureLossContract:
             "trajectory_targets": torch.randn(2, 128, 4, 32),
         }
 
-        with pytest.raises(
-            ValueError, match="not part of the default architecture-training cache"
-        ):
+        with pytest.raises(ValueError, match="Architecture training defaults"):
             loss_fn(
                 student_outputs=student_outputs,
                 teacher_batch=teacher_batch_without_logits,
@@ -82,7 +82,11 @@ class TestArchitectureLossContract:
 
         loss_fn = DistillationLoss(
             LossConfig(
-                endpoint_weight=1.0, trajectory_weight=1.0, kl_weight=0.0, ce_weight=0.0
+                velocity_weight=0.0,
+                endpoint_weight=1.0,
+                trajectory_weight=1.0,
+                kl_weight=0.0,
+                ce_weight=0.0,
             ),
             span_depth=4,
         )

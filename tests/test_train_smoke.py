@@ -105,11 +105,12 @@ def test_one_train_step():
     mock_loss_fn = MagicMock()
 
     # Loss needs to be computed from outputs for proper backprop
-    def loss_side_effect(student_outputs, teacher_batch, T):
+    def loss_side_effect(student_outputs, teacher_batch, T, model=None, t=None):
         # Use a simple loss that requires grad
         loss_val = student_outputs["endpoint_hidden"].mean() * 0.1
         metrics = {
             "total_loss": loss_val.item(),
+            "velocity_loss": 0.0,
             "endpoint_loss": loss_val.item() * 0.5,
             "trajectory_loss": loss_val.item() * 0.5,
         }
@@ -143,6 +144,7 @@ def test_one_train_step():
         "train_loop": {
             "precision": "fp32",
             "accumulate_grad_batches": 1,
+            "sample_continuous_time": False,  # Disable continuous time for legacy test
         },
         "model": {"train_T_values": [4], "train_T_weights": [1.0]},
     }
@@ -452,6 +454,46 @@ def test_amp_bf16_available():
     assert trainer.precision == "bf16"
 
 
+def test_trainer_samples_continuous_t_between_zero_and_one():
+    """Test that trainer samples continuous t values between 0 and 1."""
+    from src.training.trainer import Trainer
+
+    # Create mock model with proper parameters
+    mock_model = MagicMock()
+    mock_param = nn.Parameter(torch.randn(10))
+    mock_model.parameters = Mock(return_value=[mock_param])
+
+    config = {
+        "optimizer": {
+            "name": "adamw",
+            "learning_rate": 1e-4,
+            "weight_decay": 0.01,
+            "betas": [0.9, 0.95],
+            "eps": 1e-8,
+        },
+        "scheduler": {"name": "cosine_with_warmup", "warmup_steps": 10},
+        "train_loop": {
+            "precision": "fp32",
+            "accumulate_grad_batches": 1,
+        },
+        "model": {"train_T_values": [4], "train_T_weights": [1.0]},
+    }
+
+    trainer = Trainer(
+        model=mock_model,
+        loss_fn=MagicMock(),
+        config=config,
+        device="cpu",
+    )
+
+    # Sample continuous t values
+    t = trainer.sample_continuous_time(batch_size=2, device=torch.device("cpu"))
+
+    assert torch.all(t >= 0.0)
+    assert torch.all(t <= 1.0)
+    assert t.shape == (2,)
+
+
 def test_gradient_accumulation():
     """Test that gradient accumulation works correctly."""
     from src.training.trainer import Trainer
@@ -466,17 +508,18 @@ def test_gradient_accumulation():
         endpoint_hidden = torch.randn(2, 16, 128, requires_grad=True)
         return {
             "endpoint_hidden": endpoint_hidden,
-            "trajectory_hidden": torch.randn(2, 16, 4, 128),
+            "trajectory_hidden": torch.randn(2, 16, 4128),
             "logits": torch.randn(2, 16, 1000),
         }
 
     mock_model.side_effect = model_forward
 
     # Loss function that computes from outputs
-    def loss_side_effect(student_outputs, teacher_batch, T):
+    def loss_side_effect(student_outputs, teacher_batch, T, model=None, t=None):
         loss_val = student_outputs["endpoint_hidden"].mean() * 0.1
         metrics = {
             "total_loss": loss_val.item(),
+            "velocity_loss": 0.0,
             "endpoint_loss": loss_val.item() * 0.5,
             "trajectory_loss": loss_val.item() * 0.5,
         }
@@ -509,6 +552,7 @@ def test_gradient_accumulation():
         "train_loop": {
             "precision": "fp32",
             "accumulate_grad_batches": 4,
+            "sample_continuous_time": False,  # Disable continuous time for legacy test
         },
         "model": {"train_T_values": [4], "train_T_weights": [1.0]},
     }

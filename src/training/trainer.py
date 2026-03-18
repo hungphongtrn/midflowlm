@@ -253,6 +253,20 @@ class Trainer:
             # Uniform sampling
             return random.choice(self.train_T_values)
 
+    def sample_continuous_time(
+        self, batch_size: int, device: torch.device
+    ) -> torch.Tensor:
+        """Sample continuous time values from uniform distribution U(0, 1).
+
+        Args:
+            batch_size: Number of samples to generate
+            device: Device to create tensor on
+
+        Returns:
+            Continuous time values [batch_size], each in [0, 1]
+        """
+        return torch.rand(batch_size, device=device)
+
     def train_step(
         self, batch: Dict[str, torch.Tensor], T: Optional[int] = None
     ) -> Dict[str, float]:
@@ -277,6 +291,17 @@ class Trainer:
             for k, v in batch.items()
         }
 
+        # Sample continuous time if enabled
+        sample_continuous_time = self.train_loop_config.get(
+            "sample_continuous_time", False
+        )
+        if sample_continuous_time:
+            batch_size = batch["input_ids"].shape[0]
+            t = self.sample_continuous_time(batch_size, self.device)
+            logger.debug(f"Sampled continuous time t: {t}")
+        else:
+            t = None
+
         # Forward pass with optional AMP
         if self.use_amp:
             # Use torch.amp.autocast for newer PyTorch, fallback to torch.cuda.amp.autocast
@@ -298,6 +323,8 @@ class Trainer:
                     student_outputs=student_outputs,
                     teacher_batch=batch,
                     T=T,
+                    model=self.model,
+                    t=t,
                 )
         else:
             student_outputs = self.model(
@@ -312,6 +339,8 @@ class Trainer:
                 student_outputs=student_outputs,
                 teacher_batch=batch,
                 T=T,
+                model=self.model,
+                t=t,
             )
 
         # Scale loss for gradient accumulation
@@ -353,6 +382,7 @@ class Trainer:
         # Prepare metrics
         metrics = {
             "loss": loss_metrics.get("total_loss", total_loss.item()),
+            "velocity_loss": loss_metrics.get("velocity_loss", 0.0),
             "endpoint_loss": loss_metrics.get("endpoint_loss", 0.0),
             "trajectory_loss": loss_metrics.get("trajectory_loss", 0.0),
             "kl_loss": loss_metrics.get("kl_loss", 0.0),
@@ -360,6 +390,10 @@ class Trainer:
             "T": T,
             "lr": self.optimizer.param_groups[0]["lr"],
         }
+
+        if sample_continuous_time and t is not None:
+            metrics["t_mean"] = t.mean().item()
+            metrics["t_std"] = t.std().item()
 
         return metrics
 
@@ -387,6 +421,16 @@ class Trainer:
             for k, v in batch.items()
         }
 
+        # Sample continuous time if enabled
+        sample_continuous_time = self.train_loop_config.get(
+            "sample_continuous_time", False
+        )
+        if sample_continuous_time:
+            batch_size = batch["input_ids"].shape[0]
+            t = self.sample_continuous_time(batch_size, self.device)
+        else:
+            t = None
+
         with torch.no_grad():
             # Forward pass with optional AMP
             if self.use_amp:
@@ -409,6 +453,8 @@ class Trainer:
                         student_outputs=student_outputs,
                         teacher_batch=batch,
                         T=T,
+                        model=self.model,
+                        t=t,
                     )
             else:
                 student_outputs = self.model(
@@ -423,11 +469,14 @@ class Trainer:
                     student_outputs=student_outputs,
                     teacher_batch=batch,
                     T=T,
+                    model=self.model,
+                    t=t,
                 )
 
         # Prepare metrics
         metrics = {
             "loss": loss_metrics.get("total_loss", total_loss.item()),
+            "velocity_loss": loss_metrics.get("velocity_loss", 0.0),
             "endpoint_loss": loss_metrics.get("endpoint_loss", 0.0),
             "trajectory_loss": loss_metrics.get("trajectory_loss", 0.0),
             "kl_loss": loss_metrics.get("kl_loss", 0.0),
