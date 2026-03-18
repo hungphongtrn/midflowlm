@@ -20,6 +20,7 @@ import argparse
 import logging
 import random
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import torch
@@ -57,6 +58,54 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def get_timestamped_experiment_name(base_name: str) -> str:
+    """Generate timestamped experiment name.
+
+    Args:
+        base_name: Base experiment name (e.g., "v0_qwen_iterative_midblock")
+
+    Returns:
+        Timestamped name like "00-21-19-03-2026-v0_qwen_iterative_midblock"
+    """
+    timestamp = datetime.now().strftime("%H-%M-%d-%m-%Y")
+    return f"{timestamp}-{base_name}"
+
+
+def update_config_with_timestamp(config: dict) -> dict:
+    """Update config with timestamped experiment name.
+
+    Modifies checkpoint_dir and log_dir to include timestamp.
+
+    Args:
+        config: Configuration dictionary
+
+    Returns:
+        Updated config with timestamped paths
+    """
+    base_name = config.get("experiment_name", "experiment")
+    timestamped_name = get_timestamped_experiment_name(base_name)
+
+    # Update checkpoint_dir
+    train_loop = config.get("train_loop", {})
+    checkpoint_dir = train_loop.get("checkpoint_dir", "./checkpoints")
+    # Replace base_name with timestamped_name in the path
+    checkpoint_dir = checkpoint_dir.replace(base_name, timestamped_name)
+    train_loop["checkpoint_dir"] = checkpoint_dir
+    config["train_loop"] = train_loop
+
+    # Update log_dir
+    logging_config = config.get("logging", {})
+    log_dir = logging_config.get("log_dir", "./logs")
+    log_dir = log_dir.replace(base_name, timestamped_name)
+    logging_config["log_dir"] = log_dir
+    config["logging"] = logging_config
+
+    # Update experiment_name
+    config["experiment_name"] = timestamped_name
+
+    return config
 
 
 def create_student_model(config: dict, device: str) -> FrozenQwenStudent:
@@ -194,6 +243,10 @@ def main():
     # Load config
     logger.info(f"Loading config from {args.config}")
     config = load_config(args.config)
+
+    # Add timestamp to experiment name
+    config = update_config_with_timestamp(config)
+    logger.info(f"Experiment name: {config['experiment_name']}")
 
     # Set seed
     seed = config.get("seed", 1337)
