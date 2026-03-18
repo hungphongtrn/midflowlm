@@ -792,3 +792,89 @@ class TestMidblockInputInterface:
         )
 
         assert output.shape == sample_hidden_states.shape
+
+
+class TestFlowMidblockVelocityAPI:
+    """Test FlowMidblock velocity predictor API."""
+
+    def test_flow_midblock_get_velocity_matches_hidden_shape(
+        self, sample_hidden_states, device
+    ):
+        """Test that get_velocity returns velocity with correct shape."""
+        from src.model.midblock import FlowMidblock
+
+        block = FlowMidblock(hidden_size=sample_hidden_states.shape[-1]).to(device)
+        t = torch.tensor([0.5, 0.5], device=device)
+        velocity = block.get_velocity(
+            sample_hidden_states, sample_hidden_states, None, t
+        )
+        assert velocity.shape == sample_hidden_states.shape
+
+    def test_flow_midblock_forward_euler_step_uses_dt(
+        self, sample_hidden_states, device
+    ):
+        """Test that forward method uses dt for Euler integration."""
+        from src.model.midblock import FlowMidblock
+
+        block = FlowMidblock(hidden_size=sample_hidden_states.shape[-1]).to(device)
+        t = torch.tensor([0.0, 0.0], device=device)
+        h_next = block.forward(
+            sample_hidden_states, sample_hidden_states, None, t, dt=0.25
+        )
+        assert h_next.shape == sample_hidden_states.shape
+
+    def test_flow_midblock_velocity_field_consistency(
+        self, sample_hidden_states, device
+    ):
+        """Test that velocity field is consistent across multiple calls."""
+        from src.model.midblock import FlowMidblock
+
+        block = FlowMidblock(hidden_size=sample_hidden_states.shape[-1]).to(device)
+        block.eval()
+        t = torch.tensor([0.5, 0.5], device=device)
+
+        # Get velocity twice with same input
+        v1 = block.get_velocity(sample_hidden_states, sample_hidden_states, None, t)
+        v2 = block.get_velocity(sample_hidden_states, sample_hidden_states, None, t)
+
+        # Should be identical
+        assert torch.allclose(v1, v2, atol=1e-6)
+
+    def test_flow_midblock_euler_integration_matches_manual(
+        self, sample_hidden_states, device
+    ):
+        """Test that forward Euler step matches manual computation."""
+        from src.model.midblock import FlowMidblock
+
+        block = FlowMidblock(hidden_size=sample_hidden_states.shape[-1]).to(device)
+        block.eval()
+        t = torch.tensor([0.3, 0.3], device=device)
+        dt = 0.1
+
+        # Compute using forward method
+        h_next = block.forward(
+            sample_hidden_states, sample_hidden_states, None, t, dt=dt
+        )
+
+        # Compute manually: h_{t+dt} = h_t + v * dt
+        v = block.get_velocity(sample_hidden_states, sample_hidden_states, None, t)
+        h_manual = sample_hidden_states + v * dt
+
+        # Should match
+        assert torch.allclose(h_next, h_manual, atol=1e-6)
+
+    def test_flow_midblock_velocity_scales_with_t(self, sample_hidden_states, device):
+        """Test that velocity changes with different time values."""
+        from src.model.midblock import FlowMidblock
+
+        block = FlowMidblock(hidden_size=sample_hidden_states.shape[-1]).to(device)
+
+        # Get velocity at different times
+        t1 = torch.zeros(2, device=device)
+        t2 = torch.ones(2, device=device)
+
+        v1 = block.get_velocity(sample_hidden_states, sample_hidden_states, None, t1)
+        v2 = block.get_velocity(sample_hidden_states, sample_hidden_states, None, t2)
+
+        # Should be different (with high probability)
+        assert not torch.allclose(v1, v2, atol=1e-4)

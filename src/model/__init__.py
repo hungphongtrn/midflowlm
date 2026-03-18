@@ -7,7 +7,7 @@ from .qwen_parity import (
     get_trainable_parameter_count,
     get_total_parameter_count,
 )
-from .midblock import IterativeMidblock
+from .midblock import FlowMidblock, IterativeMidblock
 from .adapter import StepConditioningAdapter, BoundaryConditioningAdapter
 from .student_qwen import (
     FrozenQwenStudent,
@@ -20,6 +20,7 @@ __all__ = [
     "get_frozen_parameter_count",
     "get_trainable_parameter_count",
     "get_total_parameter_count",
+    "FlowMidblock",
     "IterativeMidblock",
     "StepConditioningAdapter",
     "BoundaryConditioningAdapter",
