@@ -84,6 +84,13 @@ Examples:
         help="Device used for inference.",
     )
     parser.add_argument(
+        "--solver-method",
+        type=str,
+        default="euler",
+        choices=["euler", "rk4", "dopri5", "adaptive_heun", "adaptive_lsoda"],
+        help="ODE solver method formidblock integration.",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default=None,
@@ -107,11 +114,13 @@ def main() -> int:
         max_new_tokens=args.max_new_tokens,
         device=args.device,
         output_path=args.output,
+        solver_method=args.solver_method,
     )
 
     print(f"Loaded checkpoint: {payload['checkpoint']['path']}")
     print(f"Checkpoint format: {payload['checkpoint']['checkpoint_format']}")
     print(f"Device: {payload['device']}")
+    print(f"Solver method: {payload['solver_method']}")
     print(f"Prompts: {len(texts)}")
     print(f"Tested num_steps: {payload['num_steps']}")
     print(f"Configured max_steps_T: {payload['max_steps_T']}")

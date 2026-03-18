@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -31,6 +32,73 @@ class SweepResult:
     prompt_length: int
     completion_length: int
     stopped_on_eos: bool
+
+
+def compute_repetition_metrics(
+    text: str, n_values: tuple[int, ...] = (2, 3, 4)
+) -> dict[str, float]:
+    """Compute n-gram repetition ratios for text.
+
+    Args:
+        text: Input text to analyze
+        n_values: Tuple of n-gram sizes to analyze
+
+    Returns:
+        Dict mapping 'repeat_{n}gram_ratio' to ratio of repeated n-grams
+    """
+    words = text.split()
+    if len(words) < 2:
+        return {f"repeat_{n}gram_ratio": 0.0 for n in n_values}
+
+    metrics = {}
+    for n in n_values:
+        if len(words) < n:
+            metrics[f"repeat_{n}gram_ratio"] = 0.0
+            continue
+
+        ngrams = [tuple(words[i : i + n]) for i in range(len(words) - n + 1)]
+        if not ngrams:
+            metrics[f"repeat_{n}gram_ratio"] = 0.0
+            continue
+
+        counts = Counter(ngrams)
+        total_ngrams = len(ngrams)
+        repeated_ngrams = sum(count - 1 for count in counts.values() if count > 1)
+
+        ratio = repeated_ngrams / total_ngrams if total_ngrams > 0 else 0.0
+        metrics[f"repeat_{n}gram_ratio"] = ratio
+
+    return metrics
+
+
+def aggregate_repetition_metrics(
+    comparisons: list[dict[str, Any]], n_values: tuple[int, ...] = (2, 3, 4)
+) -> dict[str, float]:
+    """Compute aggregate repetition metrics across comparisons.
+
+    Args:
+        comparisons: List of comparison dicts with 'generated_text' keys
+        n_values: Tuple of n-gram sizes to analyze
+
+    Returns:
+        Dict mapping 'mean_repeat_{n}gram_ratio' to mean ratio
+    """
+    if not comparisons:
+        return {f"mean_repeat_{n}gram_ratio": 0.0 for n in n_values}
+
+    all_metrics = []
+    for comparison in comparisons:
+        text = comparison.get("generated_text", "")
+        metrics = compute_repetition_metrics(text, n_values)
+        all_metrics.append(metrics)
+
+    aggregated = {}
+    for n in n_values:
+        key = f"repeat_{n}gram_ratio"
+        mean_value = sum(m[key] for m in all_metrics) / len(all_metrics)
+        aggregated[f"mean_repeat_{n}gram_ratio"] = mean_value
+
+    return aggregated
 
 
 def load_config(config_path: str | Path) -> dict[str, Any]:
@@ -116,6 +184,7 @@ def greedy_generate(
     num_steps: int,
     max_new_tokens: int,
     stop_on_eos: bool = True,
+    solver_method: str = "euler",
 ) -> SweepResult:
     encoded = tokenizer(prompt, return_tensors="pt")
     input_ids = encoded["input_ids"].to(model.device)
@@ -132,6 +201,7 @@ def greedy_generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 num_steps=num_steps,
+                solver_method=solver_method,
             )
             next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)
             next_token_id = int(next_token.item())
@@ -190,6 +260,7 @@ def build_comparison_rows(
     texts: list[str],
     num_steps: list[int],
     max_new_tokens: int,
+    solver_method: str = "euler",
 ) -> list[dict[str, Any]]:
     rows = []
     for text in texts:
@@ -200,6 +271,7 @@ def build_comparison_rows(
                 text,
                 num_steps=1,
                 max_new_tokens=max_new_tokens,
+                solver_method="euler",
             )
         )
         trained_results = {
@@ -210,6 +282,7 @@ def build_comparison_rows(
                     text,
                     num_steps=step_count,
                     max_new_tokens=max_new_tokens,
+                    solver_method=solver_method,
                 )
             )
             for step_count in num_steps
@@ -270,6 +343,7 @@ def run_text_sweep(
     max_new_tokens: int,
     device: str,
     output_path: Optional[str | Path] = None,
+    solver_method: str = "euler",
 ) -> dict[str, Any]:
     config = load_config(config_path)
     max_steps_T = int(config["model"]["max_steps_T"])
@@ -287,6 +361,7 @@ def run_text_sweep(
         texts=texts,
         num_steps=num_steps,
         max_new_tokens=max_new_tokens,
+        solver_method=solver_method,
     )
     table = build_text_table(comparisons, num_steps)
 
@@ -297,8 +372,10 @@ def run_text_sweep(
         "max_new_tokens": max_new_tokens,
         "num_steps": num_steps,
         "max_steps_T": max_steps_T,
+        "solver_method": solver_method,
         "warnings": warnings,
         "comparisons": comparisons,
+        "repetition_metrics": aggregate_repetition_metrics(comparisons),
         "table": table,
     }
 

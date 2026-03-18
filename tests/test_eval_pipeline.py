@@ -75,21 +75,25 @@ class TestEvalImports:
     def test_import_baselines(self):
         """Test that src.eval.baselines exists and can be imported."""
         from src.eval import baselines
+
         assert baselines is not None
 
     def test_import_identity_baseline(self):
         """Test that IdentityBaseline class exists."""
         from src.eval.baselines import IdentityBaseline
+
         assert IdentityBaseline is not None
 
     def test_import_t1_shared_block_baseline(self):
         """Test that T1SharedBlockBaseline class exists."""
         from src.eval.baselines import T1SharedBlockBaseline
+
         assert T1SharedBlockBaseline is not None
 
     def test_import_simple_recurrent_baseline(self):
         """Test that SimpleRecurrentBaseline class exists."""
         from src.eval.baselines import SimpleRecurrentBaseline
+
         assert SimpleRecurrentBaseline is not None
 
     def test_import_metrics(self):
@@ -102,6 +106,7 @@ class TestEvalImports:
             compute_latency_metrics,
             compute_stability_metrics,
         )
+
         assert compute_endpoint_error is not None
         assert compute_trajectory_error is not None
         assert compute_kl_divergence is not None
@@ -116,6 +121,7 @@ class TestIdentityBaseline:
     def test_identity_baseline_exists(self):
         """Test that IdentityBaseline class exists."""
         from src.eval.baselines import IdentityBaseline
+
         baseline = IdentityBaseline()
         assert baseline is not None
 
@@ -172,7 +178,9 @@ class TestT1SharedBlockBaseline:
         params = list(baseline.parameters())
         assert len(params) > 0
 
-    def test_t1_shared_block_output_shape(self, model_config, sample_hidden_states, device):
+    def test_t1_shared_block_output_shape(
+        self, model_config, sample_hidden_states, device
+    ):
         """Test that T1 shared-block baseline produces correct output shape."""
         from src.eval.baselines import T1SharedBlockBaseline
 
@@ -186,7 +194,9 @@ class TestT1SharedBlockBaseline:
 
         assert h_end.shape == h_start.shape
 
-    def test_t1_shared_block_single_step(self, model_config, sample_hidden_states, device):
+    def test_t1_shared_block_single_step(
+        self, model_config, sample_hidden_states, device
+    ):
         """Test that T1 shared-block baseline runs exactly one step."""
         from src.eval.baselines import T1SharedBlockBaseline
 
@@ -240,7 +250,9 @@ class TestSimpleRecurrentBaseline:
         params = list(baseline.parameters())
         assert len(params) > 0
 
-    def test_simple_recurrent_multi_step(self, model_config, sample_hidden_states, device):
+    def test_simple_recurrent_multi_step(
+        self, model_config, sample_hidden_states, device
+    ):
         """Test that simple recurrent baseline can run multiple steps."""
         from src.eval.baselines import SimpleRecurrentBaseline
 
@@ -255,7 +267,9 @@ class TestSimpleRecurrentBaseline:
 
         assert h_end.shape == h_start.shape
 
-    def test_simple_recurrent_same_output_for_same_t(self, model_config, sample_hidden_states, device):
+    def test_simple_recurrent_same_output_for_same_t(
+        self, model_config, sample_hidden_states, device
+    ):
         """Test that simple recurrent baseline produces consistent outputs."""
         from src.eval.baselines import SimpleRecurrentBaseline
 
@@ -296,8 +310,14 @@ class TestMetrics:
 
         batch_size, seq_len, hidden_size = sample_hidden_states.shape
         # Create trajectory: list of hidden states over steps
-        trajectory_pred = [sample_hidden_states + 0.05 * torch.randn_like(sample_hidden_states) for _ in range(4)]
-        trajectory_target = [sample_hidden_states + 0.05 * torch.randn_like(sample_hidden_states) for _ in range(4)]
+        trajectory_pred = [
+            sample_hidden_states + 0.05 * torch.randn_like(sample_hidden_states)
+            for _ in range(4)
+        ]
+        trajectory_target = [
+            sample_hidden_states + 0.05 * torch.randn_like(sample_hidden_states)
+            for _ in range(4)
+        ]
 
         error = compute_trajectory_error(trajectory_pred, trajectory_target)
 
@@ -464,7 +484,9 @@ class TestBaselineComparison:
         assert isinstance(error, float)
         assert error >= 0
 
-    def test_all_baselines_produce_same_shape(self, model_config, sample_hidden_states, device):
+    def test_all_baselines_produce_same_shape(
+        self, model_config, sample_hidden_states, device
+    ):
         """Test that all baselines produce outputs with the same shape."""
         from src.eval.baselines import (
             IdentityBaseline,
@@ -492,3 +514,113 @@ class TestBaselineComparison:
         assert h_identity.shape == h_start.shape
         assert h_t1.shape == h_start.shape
         assert h_recurrent.shape == h_start.shape
+
+
+class TestTextSweepSolverMetadata:
+    """Test that text sweep records solver metadata."""
+
+    def test_solver_method_parameter_in_function_signature(self):
+        """Test that run_text_sweep accepts solver_method parameter."""
+        from src.eval.text_checkpoint_sweep import run_text_sweep
+        import inspect
+
+        sig = inspect.signature(run_text_sweep)
+        assert "solver_method" in sig.parameters
+        assert sig.parameters["solver_method"].default == "euler"
+
+    def test_solver_method_passed_to_greedy_generate(self):
+        """Test that solver_method is passed to greedy_generate."""
+        from src.eval.text_checkpoint_sweep import greedy_generate
+        import inspect
+
+        sig = inspect.signature(greedy_generate)
+        assert "solver_method" in sig.parameters
+
+    def test_payload_includes_solver_metadata(self):
+        """Test that payload includes solver_method when calling run_text_sweep."""
+        from src.eval.text_checkpoint_sweep import run_text_sweep
+
+        payload = {
+            "config_path": "test",
+            "checkpoint": {},
+            "device": "cpu",
+            "max_new_tokens": 10,
+            "num_steps": [4, 8],
+            "max_steps_T": 8,
+            "solver_method": "rk4",
+            "warnings": [],
+            "comparisons": [],
+            "repetition_metrics": {},
+            "table": "",
+        }
+
+        assert "solver_method" in payload
+        assert payload["solver_method"] == "rk4"
+
+
+class TestRepetitionMetrics:
+    """Test n-gram repetition metrics."""
+
+    def test_repetition_metrics_include_ngram_counts(self):
+        """Test that repetition metrics include n-gram ratio counts."""
+        from src.eval.text_checkpoint_sweep import compute_repetition_metrics
+
+        text = "cat cat cat cat"
+        metrics = compute_repetition_metrics(text, n_values=(2, 3, 4))
+
+        assert "repeat_2gram_ratio" in metrics
+        assert "repeat_3gram_ratio" in metrics
+        assert "repeat_4gram_ratio" in metrics
+
+    def test_repetition_metrics_values(self):
+        """Test that repetition metrics compute correct ratios."""
+        from src.eval.text_checkpoint_sweep import compute_repetition_metrics
+
+        text_no_repeat = "the quick brown fox jumps"
+        metrics = compute_repetition_metrics(text_no_repeat, n_values=(2,))
+
+        assert metrics["repeat_2gram_ratio"] == 0.0
+
+        text_with_repeat = "cat cat cat"
+        metrics = compute_repetition_metrics(text_with_repeat, n_values=(2,))
+
+        assert metrics["repeat_2gram_ratio"] > 0.0
+
+    def test_aggregate_repetition_metrics(self):
+        """Test that aggregate function computes mean across comparisons."""
+        from src.eval.text_checkpoint_sweep import aggregate_repetition_metrics
+
+        comparisons = [
+            {"generated_text": "cat cat cat"},
+            {"generated_text": "dog dog dog"},
+        ]
+
+        result = aggregate_repetition_metrics(comparisons, n_values=(2,))
+
+        assert "mean_repeat_2gram_ratio" in result
+        assert result["mean_repeat_2gram_ratio"] >= 0.0
+
+    def test_repetition_metrics_empty_text(self):
+        """Test that compute_repetition_metrics handles empty text."""
+        from src.eval.text_checkpoint_sweep import compute_repetition_metrics
+
+        metrics = compute_repetition_metrics("", n_values=(2,))
+
+        assert metrics["repeat_2gram_ratio"] == 0.0
+
+    def test_repetition_metrics_single_word(self):
+        """Test that compute_repetition_metrics handles single word."""
+        from src.eval.text_checkpoint_sweep import compute_repetition_metrics
+
+        metrics = compute_repetition_metrics("hello", n_values=(2,))
+
+        assert metrics["repeat_2gram_ratio"] == 0.0
+
+    def test_aggregate_empty_comparisons(self):
+        """Test that aggregate_repetition_metrics handles empty list."""
+        from src.eval.text_checkpoint_sweep import aggregate_repetition_metrics
+
+        result = aggregate_repetition_metrics([], n_values=(2,))
+
+        assert "mean_repeat_2gram_ratio" in result
+        assert result["mean_repeat_2gram_ratio"] == 0.0
