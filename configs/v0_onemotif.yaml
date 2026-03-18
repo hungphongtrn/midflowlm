@@ -5,9 +5,12 @@ model:
   name: "Qwen/Qwen3.5-0.8B"
   revision: null
   max_steps_T: 8
-  train_T_values: [1, 2, 4, 6, 8]
-  train_T_weights: [0.20, 0.35, 0.20, 0.15, 0.10]
-  step_embedding: "discrete"
+  time_domain: [0.0, 1.0]
+  time_embedding: "sinusoidal"
+  ode_solver:
+    method: "euler"
+    atol: 1.0e-5
+    rtol: 1.0e-5
   reuse_qwen_modules: true
 
 replacement_model:
@@ -21,7 +24,9 @@ replacement_model:
   mlp_ratio: 4.0
   qkv_bias: true
   use_qwen_causal_mask: true
-  use_step_conditioning: true
+  predict_velocity: true
+  use_step_conditioning: false
+  use_time_conditioning: true
   conditioning_mode: "timestep_plus_layer_boundary"
   init_strategy: "fresh"
   trajectory_alignment:
@@ -88,6 +93,7 @@ train_loop:
   log_every_n_steps: 10
   val_check_interval: 250
   gradient_checkpointing: false
+  sample_continuous_time: true
   checkpoint_dir: "./outputs/v0_qwen_iterative_midblock/checkpoints"
   resume_from_checkpoint: null
 

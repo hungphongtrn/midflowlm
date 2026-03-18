@@ -8,6 +8,17 @@ import pytest
 import torch
 
 
+def test_architecture_config_uses_continuous_time_defaults():
+    """Test that config uses continuous-time ODE defaults."""
+    import yaml
+
+    with open("configs/v0_onemotif.yaml") as f:
+        cfg = yaml.safe_load(f)
+    assert cfg["model"]["time_domain"] == [0.0, 1.0]
+    assert cfg["model"]["ode_solver"]["method"] == "euler"
+    assert "step_embedding" not in cfg["model"]
+
+
 class TestArchitectureLossContract:
     """Test default architecture loss contract (no logits required)."""
 
