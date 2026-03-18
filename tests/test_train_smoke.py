@@ -43,18 +43,16 @@ def test_deterministic_dataloaders_from_cache():
         with open(cache_dir / "metadata.json", "w") as f:
             json.dump(metadata, f)
 
-        # Create mock shards
+        # Create mock shards with velocity_target for continuous-time training
         for i in range(2):
+            h_start = torch.randn(8, 32, 128)
+            h_target = torch.randn(8, 32, 128)
             shard_data = {
                 "input_ids": torch.randint(0, 1000, (8, 32)),
                 "attention_mask": torch.ones(8, 32, dtype=torch.int64),
-                "h_start": torch.randn(8, 32, 128),
-                "h_target": torch.randn(8, 32, 128),
-                "trajectory_target_0": torch.randn(8, 32, 128),
-                "trajectory_target_1": torch.randn(8, 32, 128),
-                "trajectory_target_2": torch.randn(8, 32, 128),
-                "trajectory_target_3": torch.randn(8, 32, 128),
-                "num_trajectory_targets": torch.tensor(4),
+                "h_start": h_start,
+                "h_target": h_target,
+                "velocity_target": h_target - h_start,  # v_target = h_end - h_start
                 "teacher_logits": torch.randn(8, 32, 1000),
             }
             torch.save(shard_data, cache_dir / f"shard_{i:04d}_of_0002.pt")
@@ -119,13 +117,15 @@ def test_one_train_step():
 
     mock_loss_fn.side_effect = loss_side_effect
 
-    # Create mock batch
+    # Create mock batch with velocity_target for continuous-time training
+    h_start = torch.randn(2, 16, 128)
+    h_target = torch.randn(2, 16, 128)
     batch = {
         "input_ids": torch.randint(0, 1000, (2, 16)),
         "attention_mask": torch.ones(2, 16, dtype=torch.int64),
-        "h_start": torch.randn(2, 16, 128),
-        "h_target": torch.randn(2, 16, 128),
-        "trajectory_targets": torch.randn(2, 16, 4, 128),
+        "h_start": h_start,
+        "h_target": h_target,
+        "velocity_target": h_target - h_start,  # v_target = h_end - h_start
         "teacher_logits": torch.randn(2, 16, 1000),
     }
 
@@ -187,13 +187,15 @@ def test_one_val_step():
         },
     )
 
-    # Create mock batch
+    # Create mock batch with velocity_target for continuous-time training
+    h_start = torch.randn(2, 16, 128)
+    h_target = torch.randn(2, 16, 128)
     batch = {
         "input_ids": torch.randint(0, 1000, (2, 16)),
         "attention_mask": torch.ones(2, 16, dtype=torch.int64),
-        "h_start": torch.randn(2, 16, 128),
-        "h_target": torch.randn(2, 16, 128),
-        "trajectory_targets": torch.randn(2, 16, 4, 128),
+        "h_start": h_start,
+        "h_target": h_target,
+        "velocity_target": h_target - h_start,  # v_target = h_end - h_start
         "teacher_logits": torch.randn(2, 16, 1000),
     }
 
@@ -483,12 +485,15 @@ def test_gradient_accumulation():
     mock_loss_fn = MagicMock()
     mock_loss_fn.side_effect = loss_side_effect
 
+    # Create mock batch with velocity_target for continuous-time training
+    h_start = torch.randn(2, 16, 128)
+    h_target = torch.randn(2, 16, 128)
     batch = {
         "input_ids": torch.randint(0, 1000, (2, 16)),
         "attention_mask": torch.ones(2, 16, dtype=torch.int64),
-        "h_start": torch.randn(2, 16, 128),
-        "h_target": torch.randn(2, 16, 128),
-        "trajectory_targets": torch.randn(2, 16, 4, 128),
+        "h_start": h_start,
+        "h_target": h_target,
+        "velocity_target": h_target - h_start,  # v_target = h_end - h_start
         "teacher_logits": torch.randn(2, 16, 1000),
     }
 

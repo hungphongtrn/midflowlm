@@ -22,9 +22,20 @@ class CacheDataset(Dataset):
     - input_ids: Token IDs
     - attention_mask: Attention mask
     - h_start: Hidden state before replacement span
-    - trajectory_targets: Hidden states within the span
-    - h_target: Hidden state after replacement span
+    - velocity_target: v_target = h_target - h_start for continuous-time training
+    - h_target: Hidden state after replacement span (optional, for verification)
     - teacher_logits: Optional teacher logits
+
+    Training State Reconstruction:
+        The cache stores velocity targets that enable reconstruction of training states
+        at any timestep t in [0, 1] using the straight-line interpolation rule:
+
+            h_t = h_start + t[:, None, None] * velocity_target
+
+        This is the continuous-time formulation where:
+        - At t=0: h_0 = h_start (initial state)
+        - At t=1: h_1 = h_start + velocity_target = h_target (final state)
+        - At intermediate t: interpolated state along the straight-line trajectory
 
     Args:
         cache_dir: Directory containing cache files
@@ -128,12 +139,16 @@ class CacheDataset(Dataset):
     ) -> Dict[str, Any]:
         """Load a shard directly from its file path.
 
+        Loads cached data including velocity_target for continuous-time training.
+        For backward compatibility, also reconstructs trajectory_targets if present
+        in old format.
+
         Args:
             shard_path: Path to the shard file
             device: Device to load tensors to
 
         Returns:
-            Dictionary with loaded tensors
+            Dictionary with loaded tensors including velocity_target
         """
         from src.data.teacher_cache import HAS_SAFETENSORS
 
@@ -145,7 +160,7 @@ class CacheDataset(Dataset):
         else:
             loaded = cast(Dict[str, Any], torch.load(shard_path, map_location=device))
 
-        # Reconstruct trajectory_targets list
+        # For backward compatibility: reconstruct trajectory_targets if present in old format
         if "num_trajectory_targets" in loaded:
             num_targets = int(loaded["num_trajectory_targets"].item())
             trajectory_targets = []
@@ -210,14 +225,15 @@ class CacheDataset(Dataset):
             else:
                 sample["h_target"] = h_target[local_idx]
 
-        # trajectory_targets is already reconstructed by _load_shard_by_path
-        if "trajectory_targets" in shard_data:
-            trajectory_list = cast(List[torch.Tensor], shard_data["trajectory_targets"])
-            if trajectory_list:
-                # Stack to [depth, seq, hidden] then transpose to [seq, depth, hidden]
-                sample["trajectory_targets"] = torch.stack(
-                    trajectory_list, dim=0
-                ).transpose(0, 1)
+        # velocity_target for continuous-time training
+        if "velocity_target" in shard_data:
+            velocity_target = shard_data["velocity_target"]
+            if velocity_target.dim() == 2:
+                # [seq_len, hidden]: no batch dim
+                sample["velocity_target"] = velocity_target
+            else:
+                # [batch, seq_len, hidden]: index it
+                sample["velocity_target"] = velocity_target[local_idx]
 
         # teacher_logits is optional - only include if present
         if "teacher_logits" in shard_data:
@@ -330,6 +346,7 @@ def _collate_cache_batch(
     """Collate function for cache batches.
 
     Stacks individual samples into batched tensors.
+    All tensors including velocity_target are stacked directly.
     """
     collated = {}
 
@@ -338,12 +355,7 @@ def _collate_cache_batch(
 
     for key in keys:
         values = [sample[key] for sample in batch]
-
-        if key == "trajectory_targets":
-            # Stack trajectory targets: list of [seq, depth, hidden] -> [batch, seq, depth, hidden]
-            collated[key] = torch.stack(values, dim=0)
-        else:
-            collated[key] = torch.stack(values, dim=0)
+        collated[key] = torch.stack(values, dim=0)
 
     return collated
 

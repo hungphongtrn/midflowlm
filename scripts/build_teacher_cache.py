@@ -495,6 +495,10 @@ def verify_cache(
     logger.info(f"  Span: layers {metadata.start_layer}-{metadata.end_layer}")
     logger.info(f"  Total samples: {metadata.num_samples}")
     logger.info(f"  Store logits: {metadata.store_logits}")
+    logger.info(f"  Target type: {getattr(metadata, 'target_type', 'unknown')}")
+    logger.info(
+        f"  Training rule: {getattr(metadata, 'training_state_rule', 'unknown')}"
+    )
 
     # Load and verify samples
     from src.data.teacher_cache import load_shard
@@ -511,12 +515,21 @@ def verify_cache(
             logger.info(f"Sample {i}:")
             logger.info(f"  input_ids shape: {data['input_ids'].shape}")
             logger.info(f"  h_start shape: {data['h_start'].shape}")
-            logger.info(
-                f"  trajectory_targets count: {len(data['trajectory_targets'])}"
-            )
+            logger.info(f"  velocity_target shape: {data['velocity_target'].shape}")
             logger.info(f"  h_target shape: {data['h_target'].shape}")
             if "teacher_logits" in data:
                 logger.info(f"  teacher_logits shape: {data['teacher_logits'].shape}")
+
+            # Verify velocity_target = h_target - h_start
+            expected_velocity = data["h_target"] - data["h_start"]
+            if torch.allclose(
+                data["velocity_target"], expected_velocity, rtol=1e-5, atol=1e-6
+            ):
+                logger.info(
+                    f"  ✓ velocity_target correctly computed: h_target - h_start"
+                )
+            else:
+                logger.warning(f"  ✗ velocity_target mismatch with h_target - h_start!")
 
         except Exception as e:
             logger.error(f"Error verifying sample {i}: {e}")

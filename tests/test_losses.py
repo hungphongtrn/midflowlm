@@ -38,7 +38,9 @@ def sample_batch(device):
         "input_ids": torch.randint(0, 1000, (batch_size, seq_len), device=device),
         "attention_mask": torch.ones(batch_size, seq_len, device=device),
         "h_start": torch.randn(batch_size, seq_len, hidden_dim, device=device),
-        "trajectory_targets": torch.randn(batch_size, seq_len, 4, hidden_dim, device=device),
+        "trajectory_targets": torch.randn(
+            batch_size, seq_len, 4, hidden_dim, device=device
+        ),
         "h_target": torch.randn(batch_size, seq_len, hidden_dim, device=device),
         "teacher_logits": torch.randn(batch_size, seq_len, 1000, device=device),
         "labels": torch.randint(0, 1000, (batch_size, seq_len), device=device),
@@ -51,7 +53,9 @@ def student_outputs(device):
     batch_size, seq_len, hidden_dim = 2, 128, 896
     return {
         "endpoint_hidden": torch.randn(batch_size, seq_len, hidden_dim, device=device),
-        "trajectory_hidden": torch.randn(batch_size, seq_len, 4, hidden_dim, device=device),
+        "trajectory_hidden": torch.randn(
+            batch_size, seq_len, 4, hidden_dim, device=device
+        ),
         "logits": torch.randn(batch_size, seq_len, 1000, device=device),
     }
 
@@ -68,16 +72,19 @@ class TestLossImports:
     def test_import_losses(self):
         """Test that src.training.losses exists and can be imported."""
         from src.training import losses
+
         assert losses is not None
 
     def test_import_distillation_loss(self):
         """Test that DistillationLoss class exists."""
         from src.training.losses import DistillationLoss
+
         assert DistillationLoss is not None
 
     def test_import_loss_config(self):
         """Test that LossConfig dataclass exists."""
         from src.training.losses import LossConfig
+
         assert LossConfig is not None
 
 
@@ -106,13 +113,15 @@ class TestEndpointMSELoss:
         """Test that endpoint MSE respects attention mask."""
         from src.training.losses import DistillationLoss, LossConfig
 
-        config = LossConfig(endpoint_weight=1.0, trajectory_weight=0.0, mask_padding_tokens=True)
+        config = LossConfig(
+            endpoint_weight=1.0, trajectory_weight=0.0, mask_padding_tokens=True
+        )
         loss_fn = DistillationLoss(config)
 
         batch_size, seq_len, hidden_dim = 2, 4, 8
         student_hidden = torch.randn(batch_size, seq_len, hidden_dim)
         teacher_hidden = torch.randn(batch_size, seq_len, hidden_dim)
-        
+
         # Create mask with some padded tokens
         attention_mask = torch.ones(batch_size, seq_len)
         attention_mask[:, -1] = 0  # Mask last token in each sequence
@@ -125,8 +134,8 @@ class TestEndpointMSELoss:
 
         # Compute expected loss manually (only over unmasked tokens)
         diff = student_hidden - teacher_hidden
-        squared_error = (diff ** 2).mean(dim=-1)  # [batch, seq]
-        
+        squared_error = (diff**2).mean(dim=-1)  # [batch, seq]
+
         # Mask and compute mean over valid tokens
         masked_error = squared_error * attention_mask
         expected_loss = masked_error.sum() / attention_mask.sum()
@@ -137,7 +146,9 @@ class TestEndpointMSELoss:
         """Test endpoint MSE without masking."""
         from src.training.losses import DistillationLoss, LossConfig
 
-        config = LossConfig(endpoint_weight=1.0, trajectory_weight=0.0, mask_padding_tokens=False)
+        config = LossConfig(
+            endpoint_weight=1.0, trajectory_weight=0.0, mask_padding_tokens=False
+        )
         loss_fn = DistillationLoss(config)
 
         batch_size, seq_len, hidden_dim = 2, 4, 8
@@ -179,7 +190,9 @@ class TestTrajectoryLoss:
         assert "mse" in losses
         assert losses["loss"].item() >= 0
 
-    def test_trajectory_loss_with_alignment(self, device, sample_batch, student_outputs):
+    def test_trajectory_loss_with_alignment(
+        self, device, sample_batch, student_outputs
+    ):
         """Test trajectory loss with alignment policy when T != depth."""
         from src.training.losses import DistillationLoss, LossConfig
 
@@ -259,7 +272,7 @@ class TestKLDivergenceLoss:
         batch_size, seq_len, vocab_size = 2, 4, 100
         student_logits = torch.randn(batch_size, seq_len, vocab_size)
         teacher_logits = torch.randn(batch_size, seq_len, vocab_size)
-        
+
         attention_mask = torch.ones(batch_size, seq_len)
         attention_mask[:, -1] = 0  # Mask last token
 
@@ -316,6 +329,7 @@ class TestLossWeighting:
         from src.training.losses import DistillationLoss, LossConfig
 
         config = LossConfig(
+            velocity_weight=0.0,
             endpoint_weight=1.0,
             trajectory_weight=0.5,
             kl_weight=0.25,
@@ -345,6 +359,7 @@ class TestLossWeighting:
         from src.training.losses import DistillationLoss, LossConfig
 
         config = LossConfig(
+            velocity_weight=0.0,
             endpoint_weight=0.0,
             trajectory_weight=0.0,
             kl_weight=0.0,
@@ -359,6 +374,7 @@ class TestLossWeighting:
         )
 
         assert total_loss.item() == 0.0
+        assert metrics["velocity_loss"] == 0.0
         assert metrics["endpoint_loss"] == 0.0
         assert metrics["trajectory_loss"] == 0.0
         assert metrics["kl_loss"] == 0.0
@@ -373,6 +389,7 @@ class TestGroupedMetricOutputs:
         from src.training.losses import DistillationLoss, LossConfig
 
         config = LossConfig(
+            velocity_weight=0.0,
             endpoint_weight=1.0,
             trajectory_weight=1.0,
             kl_weight=0.25,
@@ -388,6 +405,7 @@ class TestGroupedMetricOutputs:
 
         # Check main metric groups
         assert "total_loss" in metrics
+        assert "velocity_loss" in metrics
         assert "endpoint_loss" in metrics
         assert "endpoint_mse" in metrics
         assert "trajectory_loss" in metrics
@@ -398,15 +416,21 @@ class TestGroupedMetricOutputs:
 
         # All values should be scalars (floats or 0-d tensors)
         for key, value in metrics.items():
-            assert isinstance(value, (float, torch.Tensor)), f"{key} should be float or Tensor"
+            assert isinstance(value, (float, torch.Tensor)), (
+                f"{key} should be float or Tensor"
+            )
             if isinstance(value, torch.Tensor):
-                assert value.shape == (), f"{key} should be scalar, got shape {value.shape}"
+                assert value.shape == (), (
+                    f"{key} should be scalar, got shape {value.shape}"
+                )
 
     def test_detached_metrics(self, device, sample_batch, student_outputs):
         """Test that metrics are detached from computation graph."""
         from src.training.losses import DistillationLoss, LossConfig
 
-        config = LossConfig(endpoint_weight=1.0, trajectory_weight=1.0)
+        config = LossConfig(
+            velocity_weight=0.0, endpoint_weight=1.0, trajectory_weight=1.0
+        )
         loss_fn = DistillationLoss(config, span_depth=4)
 
         total_loss, metrics = loss_fn.forward(
@@ -428,11 +452,13 @@ class TestFailFastBehavior:
         """Test that loss fails fast when trajectory targets are required but missing."""
         from src.training.losses import DistillationLoss, LossConfig
 
-        config = LossConfig(endpoint_weight=1.0, trajectory_weight=1.0)
+        config = LossConfig(
+            velocity_weight=0.0, endpoint_weight=1.0, trajectory_weight=1.0
+        )
         loss_fn = DistillationLoss(config, span_depth=4)
 
         teacher_batch = {
-            "h_target": torch.randn(2, 128, 896),
+            "h_target": torch.randn(2, 128, 896, device=device),
             # Missing trajectory_targets
         }
 
@@ -447,7 +473,9 @@ class TestFailFastBehavior:
         """Test that loss fails fast when endpoint target is required but missing."""
         from src.training.losses import DistillationLoss, LossConfig
 
-        config = LossConfig(endpoint_weight=1.0, trajectory_weight=0.0)
+        config = LossConfig(
+            velocity_weight=0.0, endpoint_weight=1.0, trajectory_weight=0.0
+        )
         loss_fn = DistillationLoss(config, span_depth=4)
 
         teacher_batch = {
@@ -462,11 +490,13 @@ class TestFailFastBehavior:
                 T=4,
             )
 
-    def test_fail_fast_missing_logits_for_kl(self, device, sample_batch, student_outputs):
+    def test_fail_fast_missing_logits_for_kl(
+        self, device, sample_batch, student_outputs
+    ):
         """Test that loss fails fast when logits required for KL but missing."""
         from src.training.losses import DistillationLoss, LossConfig
 
-        config = LossConfig(kl_weight=1.0)
+        config = LossConfig(velocity_weight=0.0, kl_weight=1.0)
         loss_fn = DistillationLoss(config)
 
         student_outputs_no_logits = {
@@ -496,7 +526,9 @@ class TestLossFromConfig:
         assert loss_fn.config.trajectory_weight == config["loss"]["trajectory_weight"]
         assert loss_fn.config.kl_weight == config["loss"]["kl_weight"]
         assert loss_fn.config.ce_weight == config["loss"]["ce_weight"]
-        assert loss_fn.config.mask_padding_tokens == config["loss"]["mask_padding_tokens"]
+        assert (
+            loss_fn.config.mask_padding_tokens == config["loss"]["mask_padding_tokens"]
+        )
 
     def test_from_config_with_span_depth(self, config):
         """Test that loss module extracts span_depth from config."""
@@ -504,18 +536,165 @@ class TestLossFromConfig:
 
         loss_fn = DistillationLoss.from_config(config)
 
-        expected_depth = config["replacement_model"]["end_layer"] - config["replacement_model"]["start_layer"] + 1
+        expected_depth = (
+            config["replacement_model"]["end_layer"]
+            - config["replacement_model"]["start_layer"]
+            + 1
+        )
         assert loss_fn.span_depth == expected_depth
 
 
-class TestLossDeviceAndDtype:
+def test_velocity_loss_disabled_when_weight_zero(device, student_outputs, sample_batch):
+    """Test that velocity_loss is zero when velocity_weight=0."""
+    from src.training.losses import DistillationLoss, LossConfig
+
+    config = LossConfig(velocity_weight=0.0, endpoint_weight=1.0, trajectory_weight=1.0)
+    loss_fn = DistillationLoss(config, span_depth=4)
+
+    total_loss, metrics = loss_fn(student_outputs, sample_batch, T=4)
+    assert "velocity_loss" in metrics
+    assert (
+        metrics["velocity_loss"] == 0.0
+    )  # velocity_weight=0 means velocity_loss should be 0.0
+
+
+def test_velocity_loss_penalizes_velocity_discrepancy(device):
+    """Test that velocity loss correctly penalizes incorrect velocity predictions."""
+    from src.training.losses import DistillationLoss, LossConfig
+
+    config = LossConfig(velocity_weight=1.0, endpoint_weight=0.0, trajectory_weight=0.0)
+    loss_fn = DistillationLoss(config)
+
+    batch_size, seq_len, hidden_dim = 2, 10, 64
+    h_start = torch.randn(batch_size, seq_len, hidden_dim, device=device)
+    velocity_target = torch.randn(batch_size, seq_len, hidden_dim, device=device)
+
+    mock_model_correct = MagicMock()
+    mock_midblock_correct = MagicMock()
+    mock_model_correct.midblock = mock_midblock_correct
+    mock_midblock_correct.get_velocity.return_value = velocity_target.clone()
+
+    mock_model_wrong = MagicMock()
+    mock_midblock_wrong = MagicMock()
+    mock_model_wrong.midblock = mock_midblock_wrong
+    mock_midblock_wrong.get_velocity.return_value = torch.randn(
+        batch_size, seq_len, hidden_dim, device=device
+    )
+
+    batch = {
+        "h_start": h_start,
+        "velocity_target": velocity_target,
+    }
+
+    t = torch.rand(batch_size, device=device)
+
+    loss_correct = loss_fn.compute_velocity_loss(
+        mock_model_correct, batch, t, torch.device(device)
+    )
+    loss_wrong = loss_fn.compute_velocity_loss(
+        mock_model_wrong, batch, t, torch.device(device)
+    )
+
+    assert loss_correct.shape == ()
+    assert loss_correct.item() >= 0
+    assert loss_wrong.shape == ()
+    assert loss_wrong.item() >= 0
+    assert loss_correct.item() < loss_wrong.item(), (
+        "Correct velocity prediction should have lower loss than wrong prediction"
+    )
+
+
+class TestVelocityLoss:
+    """Test velocity loss computation."""
+
+    def test_velocity_loss_basic(self, device):
+        """Test basic velocity loss computation without masking."""
+        from src.training.losses import DistillationLoss, LossConfig
+
+        config = LossConfig(velocity_weight=1.0, mask_padding_tokens=False)
+
+        batch_size, seq_len, hidden_dim = 2, 16, 128
+
+        # Create mock model with midblock
+        mock_model = MagicMock()
+        mock_midblock = MagicMock()
+        mock_model.midblock = mock_midblock
+
+        # Create velocity target (h_end - h_start)
+        h_start = torch.randn(batch_size, seq_len, hidden_dim, device=device)
+        h_end = torch.randn(batch_size, seq_len, hidden_dim, device=device)
+        velocity_target = h_end - h_start
+
+        # Mock get_velocity to return predicted velocity
+        mock_midblock.get_velocity.return_value = torch.randn(
+            batch_size, seq_len, hidden_dim, device=device
+        )
+
+        batch = {
+            "h_start": h_start,
+            "velocity_target": velocity_target,
+        }
+
+        t = torch.rand(batch_size, device=device)
+
+        loss_fn = DistillationLoss(config)
+        loss = loss_fn.compute_velocity_loss(mock_model, batch, t, torch.device(device))
+
+        assert loss.shape == ()
+        assert loss.item() >= 0
+
+    def test_velocity_loss_with_attention_mask(self, device):
+        """Test that velocity loss respects attention mask."""
+        from src.training.losses import DistillationLoss, LossConfig
+
+        config = LossConfig(velocity_weight=1.0, mask_padding_tokens=True)
+
+        batch_size, seq_len, hidden_dim = 2, 4, 8
+
+        # Create mock model
+        mock_model = MagicMock()
+        mock_midblock = MagicMock()
+        mock_model.midblock = mock_midblock
+
+        h_start = torch.randn(batch_size, seq_len, hidden_dim, device=device)
+        velocity_target = torch.randn(batch_size, seq_len, hidden_dim, device=device)
+
+        # Create attention mask with some padded tokens
+        attention_mask = torch.ones(batch_size, seq_len, device=device)
+        attention_mask[:, -1] = 0  # Mask last token in each sequence
+
+        mock_midblock.get_velocity.return_value = torch.randn(
+            batch_size, seq_len, hidden_dim, device=device
+        )
+
+        loss_fn = DistillationLoss(config)
+
+        batch = {
+            "h_start": h_start,
+            "velocity_target": velocity_target,
+            "attention_mask": attention_mask,
+        }
+
+        t = torch.rand(batch_size, device=device)
+
+        loss = loss_fn.compute_velocity_loss(mock_model, batch, t, torch.device(device))
+
+        assert loss.shape == ()
+        assert loss.item() >= 0
+
+
+class TestDetachedMetrics:
     """Test device and dtype handling."""
 
-    def test_loss_computation_preserves_device(self, device, sample_batch, student_outputs):
+    def test_loss_computation_preserves_device(
+        self, device, sample_batch, student_outputs
+    ):
         """Test that loss computation preserves tensor device."""
         from src.training.losses import DistillationLoss, LossConfig
 
-        config = LossConfig(endpoint_weight=1.0, trajectory_weight=1.0)
+        config = LossConfig(
+            velocity_weight=0.0, endpoint_weight=1.0, trajectory_weight=1.0
+        )
         loss_fn = DistillationLoss(config, span_depth=4)
 
         total_loss, metrics = loss_fn.forward(
@@ -526,11 +705,15 @@ class TestLossDeviceAndDtype:
 
         assert total_loss.device.type == student_outputs["endpoint_hidden"].device.type
 
-    def test_loss_computation_preserves_dtype(self, device, sample_batch, student_outputs):
+    def test_loss_computation_preserves_dtype(
+        self, device, sample_batch, student_outputs
+    ):
         """Test that loss computation preserves tensor dtype."""
         from src.training.losses import DistillationLoss, LossConfig
 
-        config = LossConfig(endpoint_weight=1.0, trajectory_weight=1.0)
+        config = LossConfig(
+            velocity_weight=0.0, endpoint_weight=1.0, trajectory_weight=1.0
+        )
         loss_fn = DistillationLoss(config, span_depth=4)
 
         total_loss, metrics = loss_fn.forward(

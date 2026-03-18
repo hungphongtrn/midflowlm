@@ -1,14 +1,15 @@
-"""Loss functions for endpoint and trajectory distillation.
+"""Loss functions for continuous-time velocity distillation.
 
-This module implements the supervision objectives for training the iterative
-hidden-state refiner. It supports:
-- Endpoint hidden-state MSE (required)
-- Trajectory hidden-state loss using alignment policy (required)
+This module implements the supervision objectives for training the flow-based
+hidden-state refiner using continuous-time velocity matching. It supports:
+- Velocity MSE: Matches predicted velocity to teacher velocity targets
+- Endpoint hidden-state MSE (legacy, optional)
+- Trajectory hidden-state loss using alignment policy (legacy, optional)
 - KL divergence on logits (optional)
 - Cross-entropy on labels (optional)
 
-The loss module enforces fail-fast behavior when required trajectory targets
-are missing for configured training runs.
+The loss module now defaults to continuous-time velocity supervision for
+architecture training, with legacy endpoint/trajectory losses as optional.
 """
 
 from dataclasses import dataclass
@@ -25,31 +26,35 @@ class LossConfig:
     """Configuration for distillation losses.
 
     Attributes:
-        endpoint_weight: Weight for endpoint hidden-state MSE loss
-        trajectory_weight: Weight for trajectory hidden-state loss
+        velocity_weight: Weight for continuous-time velocity MSE loss
+        endpoint_weight: Weight for endpoint hidden-state MSE loss (legacy)
+        trajectory_weight: Weight for trajectory hidden-state loss (legacy)
         kl_weight: Weight for KL divergence on logits (0.0 to disable)
         ce_weight: Weight for cross-entropy on labels (0.0 to disable)
         mask_padding_tokens: Whether to mask padding tokens in loss computation
     """
 
-    endpoint_weight: float = 1.0
-    trajectory_weight: float = 1.0
-    kl_weight: float = 0.25
+    velocity_weight: float = 1.0
+    endpoint_weight: float = 0.0
+    trajectory_weight: float = 0.0
+    kl_weight: float = 0.0
     ce_weight: float = 0.0
     mask_padding_tokens: bool = True
 
 
 class DistillationLoss(nn.Module):
-    """Distillation loss for training the iterative hidden-state refiner.
+    """Distillation loss for training the flow-based hidden-state refiner.
 
-    This module combines multiple loss terms:
-    1. Endpoint MSE: Matches final hidden state to teacher endpoint
-    2. Trajectory MSE: Matches intermediate hidden states using alignment
-    3. KL Divergence: Matches student logits to teacher logits (optional)
-    4. Cross-Entropy: Standard language modeling loss (optional)
+    This module combines multiple loss terms with continuous-time velocity
+    supervision as the primary training objective:
+    1. Velocity MSE: Matches predicted velocity to teacher velocity (default)
+    2. Endpoint MSE: Matches final hidden state to teacher endpoint (optional)
+    3. Trajectory MSE: Matches intermediate hidden states (optional)
+    4. KL Divergence: Matches student logits to teacher logits (optional)
+    5. Cross-Entropy: Standard language modeling loss (optional)
 
-    The trajectory loss is mandatory - the module will fail fast if trajectory
-    targets are missing and trajectory_weight > 0.
+    For architecture training (default), only velocity_weight should be non-zero
+    and the batch must contain 'velocity_target' from teacher cache.
 
     Args:
         config: LossConfig with weight settings
@@ -68,7 +73,7 @@ class DistillationLoss(nn.Module):
         self.span_depth = span_depth
         self.aligner_config = aligner_config or {}
 
-        # Create trajectory aligner if span_depth is provided
+        # Create trajectory aligner if span_depth is provided (legacy)
         if span_depth is not None:
             self.aligner = TrajectoryAligner(
                 span_depth=span_depth,
@@ -88,19 +93,20 @@ class DistillationLoss(nn.Module):
             DistillationLoss instance configured from config
         """
         loss_config = LossConfig(
-            endpoint_weight=config["loss"]["endpoint_weight"],
-            trajectory_weight=config["loss"]["trajectory_weight"],
-            kl_weight=config["loss"]["kl_weight"],
-            ce_weight=config["loss"]["ce_weight"],
-            mask_padding_tokens=config["loss"]["mask_padding_tokens"],
+            velocity_weight=config["loss"].get("velocity_weight", 1.0),
+            endpoint_weight=config["loss"].get("endpoint_weight", 0.0),
+            trajectory_weight=config["loss"].get("trajectory_weight", 0.0),
+            kl_weight=config["loss"].get("kl_weight", 0.0),
+            ce_weight=config["loss"].get("ce_weight", 0.0),
+            mask_padding_tokens=config["loss"].get("mask_padding_tokens", True),
         )
 
-        # Compute span_depth from layer range
+        # Compute span_depth from layer range (legacy)
         start_layer = config["replacement_model"]["start_layer"]
         end_layer = config["replacement_model"]["end_layer"]
         span_depth = end_layer - start_layer + 1
 
-        # Get alignment config if present
+        # Get alignment config if present (legacy)
         aligner_config = config["replacement_model"].get("trajectory_alignment", {})
 
         return cls(
@@ -114,29 +120,75 @@ class DistillationLoss(nn.Module):
         student_outputs: Dict[str, torch.Tensor],
         teacher_batch: Dict[str, torch.Tensor],
         T: int,
+        model: Optional[nn.Module] = None,
+        t: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """Compute total distillation loss.
 
         Args:
             student_outputs: Dict with 'endpoint_hidden', 'trajectory_hidden', 'logits'
-            teacher_batch: Dict with 'h_target', 'trajectory_targets', 'teacher_logits', 'labels'
+            teacher_batch: Dict with 'h_target', 'trajectory_targets', 'teacher_logits', 'labels', 'velocity_target'
             T: Number of student refinement steps
+            model: Student model (required for velocity loss)
+            t: Continuous time values [batch_size] (required for velocity loss)
 
         Returns:
             Tuple of (total_loss, metrics_dict)
             - total_loss: Scalar tensor for backprop
             - metrics_dict: Dict of detached scalar metrics for logging
         """
-        total_loss = torch.tensor(0.0, device=self._get_device(student_outputs))
+        device = self._get_device(student_outputs, teacher_batch)
+        total_loss = torch.tensor(0.0, device=device)
         metrics = {}
 
-        # Endpoint loss (required if weight > 0)
+        # Architecture-training contract: if teacher_logits not in batch, kl_weight must be 0.0
+        if "teacher_logits" not in teacher_batch:
+            if self.config.kl_weight > 0.0:
+                raise ValueError(
+                    "teacher_logits not in teacher_batch but kl_weight > 0.0. "
+                    "Either provide teacher_logits or set kl_weight=0.0. "
+                    "Architecture training defaults should not use KL loss."
+                )
+
+        # Velocity loss (primary training objective)
+        if self.config.velocity_weight > 0:
+            # Fail fast if required inputs are missing
+            if model is None:
+                raise ValueError(
+                    "model is required for velocity loss but got None. "
+                    "Pass the student model to compute velocity loss."
+                )
+            if t is None:
+                raise ValueError(
+                    "t (continuous time values) is required for velocity loss but got None. "
+                    "Sample t ~ U(0, 1) before calling forward."
+                )
+            if "velocity_target" not in teacher_batch:
+                raise ValueError(
+                    "velocity_target is required but missing from teacher_batch. "
+                    "Run teacher cache generation with velocity targets."
+                )
+
+            velocity_loss = self.compute_velocity_loss(
+                model=model,
+                teacher_batch=teacher_batch,
+                t=t,
+                device=device,
+            )
+            weighted_velocity_loss = velocity_loss * self.config.velocity_weight
+            total_loss = total_loss + weighted_velocity_loss
+
+            metrics["velocity_loss"] = velocity_loss.detach().item()
+        else:
+            metrics["velocity_loss"] = 0.0
+
+        # Endpoint loss (legacy, optional)
         if self.config.endpoint_weight > 0:
             # Fail fast if endpoint target is missing
             if "h_target" not in teacher_batch:
                 raise ValueError(
                     "h_target (teacher endpoint hidden state) is required but missing from teacher_batch. "
-                    "Endpoint supervision is mandatory when endpoint_weight > 0."
+                    "Endpoint supervision is enabled when endpoint_weight > 0."
                 )
 
             endpoint_losses = self.compute_endpoint_loss(
@@ -153,13 +205,13 @@ class DistillationLoss(nn.Module):
             metrics["endpoint_loss"] = 0.0
             metrics["endpoint_mse"] = 0.0
 
-        # Trajectory loss (required if weight > 0)
+        # Trajectory loss (legacy, optional)
         if self.config.trajectory_weight > 0:
             # Fail fast if trajectory targets are missing
             if "trajectory_targets" not in teacher_batch:
                 raise ValueError(
                     "trajectory_targets is required but missing from teacher_batch. "
-                    "Trajectory supervision is mandatory when trajectory_weight > 0."
+                    "Trajectory supervision is enabled when trajectory_weight > 0."
                 )
 
             trajectory_losses = self.compute_trajectory_loss(
@@ -226,6 +278,64 @@ class DistillationLoss(nn.Module):
 
         return total_loss, metrics
 
+    def compute_velocity_loss(
+        self,
+        model: nn.Module,
+        teacher_batch: Dict[str, torch.Tensor],
+        t: torch.Tensor,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Compute continuous-time velocity MSE loss.
+
+        Constructs h_t = h_start + t * velocity_target and computes MSE
+        between model's predicted velocity and target velocity. Supports
+        attention-masked loss computation when mask_padding_tokens is enabled.
+
+        Args:
+            model: Student model with midblock.get_velocity() method
+            teacher_batch: Dict with 'h_start', 'velocity_target', 'attention_mask'
+            t: Continuous time values [batch_size], sampled externally by caller
+               (typically via trainer.sample_continuous_time())
+            device: Device to run computation on
+
+        Returns:
+            Velocity MSE loss scalar tensor
+        """
+        batch_size = teacher_batch["h_start"].shape[0]
+
+        # Get velocity target (straight-line path: h_end - h_start)
+        velocity_target = teacher_batch["velocity_target"]
+
+        # Construct h_t = h_start + t * velocity_target (straight-line interpolation)
+        # t shape: [batch_size] -> expand to [batch_size, 1, 1] for broadcasting
+        t_expanded = t.view(batch_size, 1, 1)
+        h_t = teacher_batch["h_start"] + t_expanded * velocity_target
+
+        # Get velocity prediction from model's midblock
+        v_pred = model.midblock.get_velocity(
+            h_t=h_t,
+            h_start=teacher_batch["h_start"],
+            attention_mask=teacher_batch.get("attention_mask"),
+            t=t,
+        )
+
+        # Compute MSE between predicted and target velocity
+        squared_error = (v_pred - velocity_target) ** 2
+
+        # Apply masking if enabled
+        if (
+            self.config.mask_padding_tokens
+            and teacher_batch.get("attention_mask") is not None
+        ):
+            # attention_mask: [batch, seq] -> [batch, seq, 1]
+            mask = teacher_batch["attention_mask"].unsqueeze(-1)
+            masked_error = squared_error * mask
+            loss = masked_error.sum() / (mask.sum() * v_pred.shape[-1]).clamp(min=1.0)
+        else:
+            loss = squared_error.mean()
+
+        return loss
+
     def compute_endpoint_loss(
         self,
         student_hidden: torch.Tensor,
@@ -286,7 +396,7 @@ class DistillationLoss(nn.Module):
         if teacher_trajectory is None:
             raise ValueError(
                 "trajectory_targets is required but got None. "
-                "Trajectory supervision is mandatory for configured training runs."
+                "Trajectory supervision is enabled when trajectory_weight > 0."
             )
 
         if teacher_trajectory.numel() == 0:
@@ -420,12 +530,20 @@ class DistillationLoss(nn.Module):
             "ce": loss.detach(),
         }
 
-    def _get_device(self, student_outputs: Dict[str, torch.Tensor]) -> torch.device:
-        """Get device from student outputs."""
-        # Try common keys
+    def _get_device(
+        self,
+        student_outputs: Dict[str, torch.Tensor],
+        teacher_batch: Dict[str, torch.Tensor],
+    ) -> torch.device:
+        """Get device from student outputs or teacher batch."""
+        # Try student outputs first
         for key in ["endpoint_hidden", "trajectory_hidden", "logits"]:
             if key in student_outputs:
                 return student_outputs[key].device
+        # Try teacher batch
+        for key in ["h_start", "h_target", "velocity_target"]:
+            if key in teacher_batch:
+                return teacher_batch[key].device
         return torch.device("cpu")
 
     def get_trainable_weights(self) -> Dict[str, float]:
@@ -435,6 +553,7 @@ class DistillationLoss(nn.Module):
             Dict mapping loss name to weight
         """
         return {
+            "velocity": self.config.velocity_weight,
             "endpoint": self.config.endpoint_weight,
             "trajectory": self.config.trajectory_weight,
             "kl": self.config.kl_weight,

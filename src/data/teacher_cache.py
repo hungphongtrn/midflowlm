@@ -1,17 +1,28 @@
-"""Teacher cache generation with full trajectory targets.
+"""Teacher cache generation with velocity targets for continuous-time training.
 
 This module provides utilities for caching teacher model outputs including:
 - h_start: Hidden state before the replacement span
-- trajectory_targets: Full span trajectory states for each layer
-- h_target: Hidden state after the replacement span
+- velocity_target: v_target = h_target - h_start for continuous-time training
+- h_target: Hidden state after the replacement span (optional, for verification)
 - teacher_logits: Optional final logits
 
 The cache is stored in safetensors format for efficient loading during training.
+
+Training State Reconstruction:
+    The cache stores velocity targets that enable reconstruction of training states
+    at any timestep t in [0, 1] using the straight-line interpolation rule:
+
+        h_t = h_start + t[:, None, None] * velocity_target
+
+    This is the continuous-time formulation where:
+    - At t=0: h_0 = h_start (initial state)
+    - At t=1: h_1 = h_start + velocity_target = h_target (final state)
+    - At intermediate t: interpolated state along the straight-line trajectory
 """
 
 import json
 import torch
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 import logging
@@ -58,6 +69,9 @@ class CacheMetadata:
         seq_len: Sequence length for cached samples
         store_logits: Whether logits are stored in the cache (default: False)
         num_samples: Total number of samples cached
+        target_type: Type of target stored ("velocity" or "trajectory")
+        time_domain: Time domain for continuous training [start, end]
+        training_state_rule: Documentation of h_t reconstruction formula
     """
 
     model_name: str
@@ -69,6 +83,9 @@ class CacheMetadata:
     store_logits: bool = False
     num_samples: int = 0
     samples_per_shard: Optional[List[int]] = None
+    target_type: str = "velocity"
+    time_domain: List[float] = field(default_factory=lambda: [0.0, 1.0])
+    training_state_rule: str = "h_t = h_start + t[:, None, None] * velocity_target"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert metadata to dictionary."""
@@ -81,13 +98,17 @@ class CacheMetadata:
 
 
 class TeacherCacheWriter:
-    """Writer for teacher cache with full trajectory targets.
+    """Writer for teacher cache with velocity targets.
 
     This class handles:
     - Creating cache directory structure
-    - Writing metadata
-    - Writing sample shards in safetensors format
+    - Writing metadata including target_type and training state rule
+    - Writing sample shards in safetensors format with velocity targets
     - Supporting resumable/idempotent operations
+
+    The cache stores velocity_target = h_target - h_start for continuous-time training.
+    Training states are reconstructed using:
+        h_t = h_start + t[:, None, None] * velocity_target
     """
 
     def __init__(
@@ -148,6 +169,9 @@ class TeacherCacheWriter:
             seq_len=self.seq_len,
             store_logits=self.store_logits,
             num_samples=num_samples,
+            target_type="velocity",
+            time_domain=[0.0, 1.0],
+            training_state_rule="h_t = h_start + t[:, None, None] * velocity_target",
         )
 
         metadata_path = self.cache_dir / "metadata.json"
@@ -155,6 +179,8 @@ class TeacherCacheWriter:
             json.dump(metadata.to_dict(), f, indent=2)
 
         logger.info(f"Wrote metadata to {metadata_path}")
+        logger.info(f"  Target type: velocity")
+        logger.info(f"  Training state rule: h_t = h_start + t * velocity_target")
 
     def _get_shard_path(self, shard_idx: int, num_shards: int) -> Path:
         """Get the path for a shard file.
@@ -194,8 +220,8 @@ class TeacherCacheWriter:
                 - input_ids: Token IDs
                 - attention_mask: Attention mask
                 - h_start: Hidden state before span
-                - trajectory_targets: List of hidden states within span
-                - h_target: Hidden state after span
+                - velocity_target: v_target = h_target - h_start for continuous-time training
+                - h_target: Hidden state after span (optional, for verification)
                 - teacher_logits: Optional logits
             shard_idx: Index of the shard
             num_shards: Total number of shards
@@ -220,17 +246,11 @@ class TeacherCacheWriter:
         if "h_start" in sample_data:
             tensors_to_save["h_start"] = sample_data["h_start"].clone()
 
-        # Add trajectory_targets as separate tensors
-        if "trajectory_targets" in sample_data:
-            trajectory_targets = sample_data["trajectory_targets"]
-            for i, target in enumerate(trajectory_targets):
-                tensors_to_save[f"trajectory_target_{i}"] = target.clone()
-            # Store count for loading
-            tensors_to_save["num_trajectory_targets"] = torch.tensor(
-                len(trajectory_targets)
-            )
+        # Add velocity_target for continuous-time training
+        if "velocity_target" in sample_data:
+            tensors_to_save["velocity_target"] = sample_data["velocity_target"].clone()
 
-        # Add h_target (clone to avoid shared memory with last trajectory target)
+        # Add h_target (optional, for verification/debugging)
         if "h_target" in sample_data:
             tensors_to_save["h_target"] = sample_data["h_target"].clone()
 
@@ -257,6 +277,12 @@ def generate_sample_cache(
 ) -> Dict[str, Any]:
     """Generate cache data for a single sample.
 
+    This function extracts teacher outputs and computes the velocity target
+    for continuous-time training: v_target = h_target - h_start.
+
+    Training state reconstruction:
+        h_t = h_start + t[:, None, None] * velocity_target
+
     Args:
         sample: Dictionary with input_ids and attention_mask
         inspector: QwenInspector instance for extracting teacher outputs
@@ -268,8 +294,8 @@ def generate_sample_cache(
             - input_ids: Token IDs
             - attention_mask: Attention mask
             - h_start: Hidden state before replacement span
-            - trajectory_targets: List of hidden states within span
-            - h_target: Hidden state after replacement span
+            - velocity_target: v_target = h_target - h_start
+            - h_target: Hidden state after replacement span (optional)
             - teacher_logits: Optional final logits
     """
     input_ids = sample["input_ids"].to(device)
@@ -286,13 +312,18 @@ def generate_sample_cache(
         attention_mask=attention_mask,
     )
 
-    # Prepare cache data
+    # Compute velocity target: v_target = h_target - h_start
+    h_start = outputs["h_start"].cpu().squeeze(0)  # Remove batch dim
+    h_target = outputs["h_target"].cpu().squeeze(0)  # Remove batch dim
+    velocity_target = h_target - h_start
+
+    # Prepare cache data with velocity target
     cache_data = {
         "input_ids": sample["input_ids"].cpu(),
         "attention_mask": sample["attention_mask"].cpu(),
-        "h_start": outputs["h_start"].cpu().squeeze(0),  # Remove batch dim
-        "trajectory_targets": [s.cpu().squeeze(0) for s in outputs["span_states"]],
-        "h_target": outputs["h_target"].cpu().squeeze(0),  # Remove batch dim
+        "h_start": h_start,
+        "velocity_target": velocity_target,
+        "h_target": h_target,  # Keep for verification/debugging
     }
 
     if store_logits:
@@ -314,6 +345,11 @@ def generate_batch_cache(
     This function processes the entire batch at once to leverage GPU parallelism,
     then splits the results into individual sample caches.
 
+    Computes velocity targets: v_target = h_target - h_start for continuous-time training.
+
+    Training state reconstruction:
+        h_t = h_start + t[:, None, None] * velocity_target
+
     Args:
         batch: Dictionary with input_ids and attention_mask (batched)
         inspector: QwenInspector instance for extracting teacher outputs
@@ -321,7 +357,14 @@ def generate_batch_cache(
         store_logits: Whether to store teacher logits
 
     Returns:
-        List of cache dictionaries, one per sample in the batch
+        List of cache dictionaries, one per sample in the batch:
+            Each dictionary contains:
+            - input_ids: Token IDs
+            - attention_mask: Attention mask
+            - h_start: Hidden state before replacement span
+            - velocity_target: v_target = h_target - h_start
+            - h_target: Hidden state after replacement span (optional)
+            - teacher_logits: Optional logits
     """
     input_ids = batch["input_ids"].to(device)
     attention_mask = batch["attention_mask"].to(device)
@@ -339,15 +382,19 @@ def generate_batch_cache(
         attention_mask=attention_mask,
     )
 
-    # Split results into individual samples
+    # Split results into individual samples with velocity targets
     cache_list = []
     for i in range(batch_size):
+        h_start = outputs["h_start"][i].cpu()
+        h_target = outputs["h_target"][i].cpu()
+        velocity_target = h_target - h_start
+
         cache_data = {
             "input_ids": batch["input_ids"][i].cpu(),
             "attention_mask": batch["attention_mask"][i].cpu(),
-            "h_start": outputs["h_start"][i].cpu(),
-            "trajectory_targets": [s[i].cpu() for s in outputs["span_states"]],
-            "h_target": outputs["h_target"][i].cpu(),
+            "h_start": h_start,
+            "velocity_target": velocity_target,
+            "h_target": h_target,  # Keep for verification/debugging
         }
 
         if store_logits:
@@ -373,7 +420,7 @@ def load_shard(
         device: Device to load tensors to
 
     Returns:
-        Dictionary with loaded tensors
+        Dictionary with loaded tensors including velocity_target
     """
     cache_dir = Path(cache_dir)
     shard_path = cache_dir / f"shard_{shard_idx:04d}_of_{num_shards:04d}.safetensors"
@@ -395,7 +442,8 @@ def load_shard(
     else:
         loaded = torch.load(load_path, map_location=device)
 
-    # Reconstruct trajectory_targets list
+    # Note: velocity_target is stored directly, no reconstruction needed
+    # For backward compatibility, reconstruct trajectory_targets if present in old format
     if "num_trajectory_targets" in loaded:
         num_targets = int(loaded["num_trajectory_targets"].item())
         trajectory_targets = []

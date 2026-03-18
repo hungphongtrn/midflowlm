@@ -115,7 +115,7 @@ logging:
 ## Teacher Cache Information
 # - Cache location: ./cache/tinystories_qwen_boundary_states/
 # - Cache size: ~2-3GB for 20k training samples at seq_len=128
-# - Cache includes: h_start, trajectory_targets, h_target, teacher_logits
+# - Cache includes: h_start, velocity_target, h_target, teacher_logits
 # - Must be built BEFORE training: python scripts/build_teacher_cache.py --config configs/v0_onemotif.yaml
 #
 ## Checkpoint Naming Scheme

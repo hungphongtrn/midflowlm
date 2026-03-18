@@ -56,16 +56,19 @@ class TestTeacherCacheImports:
     def test_import_teacher_cache(self):
         """Test that src.data.teacher_cache exists and can be imported."""
         from src.data import teacher_cache
+
         assert teacher_cache is not None
 
     def test_import_teacher_cache_writer(self):
         """Test that TeacherCacheWriter class exists."""
         from src.data.teacher_cache import TeacherCacheWriter
+
         assert TeacherCacheWriter is not None
 
     def test_import_cache_metadata(self):
         """Test that CacheMetadata class exists."""
         from src.data.teacher_cache import CacheMetadata
+
         assert CacheMetadata is not None
 
 
@@ -495,9 +498,111 @@ class TestCacheGeneration:
         assert "input_ids" in cache_data
         assert "attention_mask" in cache_data
         assert "h_start" in cache_data
-        assert "trajectory_targets" in cache_data
-        assert "h_target" in cache_data
-        assert "teacher_logits" in cache_data
+        assert "velocity_target" in cache_data
+
+
+class TestVelocityTargetContract:
+    """Test velocity target generation and storage contract."""
+
+    def test_cache_writer_stores_velocity_target(self, config, temp_cache_dir):
+        """Test that cache writer stores velocity_target as h_end - h_start."""
+        from src.data.teacher_cache import TeacherCacheWriter, load_shard
+
+        writer = TeacherCacheWriter(
+            cache_dir=temp_cache_dir,
+            model_name=config["model"]["name"],
+            start_layer=8,
+            end_layer=11,
+            seq_len=128,
+            store_logits=True,
+        )
+
+        h_start = torch.randn(128, 896)
+        h_target = torch.randn(128, 896)
+
+        sample_data = {
+            "input_ids": torch.randint(0, 1000, (128,)),
+            "attention_mask": torch.ones(128),
+            "h_start": h_start,
+            "velocity_target": h_target - h_start,
+            "teacher_logits": torch.randn(128, 1000),
+        }
+
+        writer.write_shard(sample_data, shard_idx=0, num_shards=1)
+
+        # Load and verify velocity_target is present
+        loaded = load_shard(temp_cache_dir, shard_idx=0, num_shards=1)
+        assert "velocity_target" in loaded
+        assert loaded["velocity_target"].shape == (128, 896)
+
+    def test_build_teacher_cache_uses_h_end_minus_h_start(self, temp_cache_dir):
+        """Test that generate_sample_cache computes velocity_target = h_end - h_start."""
+        from src.data.teacher_cache import generate_sample_cache
+
+        h_start = torch.randn(1, 16, 32)
+        h_target = torch.randn(1, 16, 32)
+        span_states = [torch.randn(1, 16, 32) for _ in range(4)]
+
+        mock_inspector = MagicMock()
+        mock_inspector.extract_all.return_value = {
+            "embeddings": torch.randn(1, 16, 32),
+            "h_start": h_start,
+            "span_states": span_states,
+            "h_target": h_target,
+            "logits": torch.randn(1, 16, 1000),
+        }
+
+        sample = {
+            "input_ids": torch.randint(0, 1000, (16,)),
+            "attention_mask": torch.ones(16),
+        }
+
+        cache_data = generate_sample_cache(
+            sample=sample,
+            inspector=mock_inspector,
+            device="cpu",
+            store_logits=True,
+        )
+
+        assert "velocity_target" in cache_data
+        expected_velocity = h_target.squeeze(0) - h_start.squeeze(0)
+        assert torch.allclose(cache_data["velocity_target"], expected_velocity)
+
+    def test_batch_cache_computes_velocity_target(self):
+        """Test that generate_batch_cache computes velocity_target for each sample."""
+        from src.data.teacher_cache import generate_batch_cache
+
+        batch_size = 4
+        h_start = torch.randn(batch_size, 16, 32)
+        h_target = torch.randn(batch_size, 16, 32)
+        span_states = [torch.randn(batch_size, 16, 32) for _ in range(4)]
+
+        mock_inspector = MagicMock()
+        mock_inspector.extract_all.return_value = {
+            "embeddings": torch.randn(batch_size, 16, 32),
+            "h_start": h_start,
+            "span_states": span_states,
+            "h_target": h_target,
+            "logits": torch.randn(batch_size, 16, 1000),
+        }
+
+        batch = {
+            "input_ids": torch.randint(0, 1000, (batch_size, 16)),
+            "attention_mask": torch.ones(batch_size, 16),
+        }
+
+        cache_list = generate_batch_cache(
+            batch=batch,
+            inspector=mock_inspector,
+            device="cpu",
+            store_logits=True,
+        )
+
+        assert len(cache_list) == batch_size
+        for i, cache_data in enumerate(cache_list):
+            assert "velocity_target" in cache_data
+            expected_velocity = h_target[i] - h_start[i]
+            assert torch.allclose(cache_data["velocity_target"], expected_velocity)
 
 
 class TestCacheLoading:
