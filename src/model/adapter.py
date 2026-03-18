@@ -34,7 +34,9 @@ class StepConditioningAdapter(nn.Module):
         self,
         hidden_size: int,
         max_steps_T: int = 8,
-        encoding_mode: Literal["discrete", "sinusoidal", "t_div_T", "combined"] = "combined",
+        encoding_mode: Literal[
+            "discrete", "sinusoidal", "t_div_T", "combined"
+        ] = "combined",
         normalization: Optional[Literal["t_div_T"]] = "t_div_T",
     ):
         super().__init__()
@@ -82,8 +84,7 @@ class StepConditioningAdapter(nn.Module):
         """
         position = torch.arange(num_steps, dtype=torch.float32).unsqueeze(1)
         div_term = torch.exp(
-            torch.arange(0, dim, 2, dtype=torch.float32) *
-            (-math.log(10000.0) / dim)
+            torch.arange(0, dim, 2, dtype=torch.float32) * (-math.log(10000.0) / dim)
         )
 
         encodings = torch.zeros(num_steps, dim)
@@ -124,13 +125,17 @@ class StepConditioningAdapter(nn.Module):
 
         elif self.encoding_mode == "sinusoidal":
             # Use precomputed sinusoidal encodings
-            features = self.sinusoidal_encodings[step_id:step_id+1].to(device)
+            features = self.sinusoidal_encodings[step_id : step_id + 1].to(device)
             features = features.expand(batch_size, -1)
 
         elif self.encoding_mode == "t_div_T":
             # Normalize step_id to [0, 1] range
-            normalized_t = float(step_id) / max(1, num_steps - 1) if num_steps > 1 else 0.0
-            t_tensor = torch.tensor([[normalized_t]], dtype=torch.float32, device=device)
+            normalized_t = (
+                float(step_id) / max(1, num_steps - 1) if num_steps > 1 else 0.0
+            )
+            t_tensor = torch.tensor(
+                [[normalized_t]], dtype=torch.float32, device=device
+            )
             t_tensor = t_tensor.expand(batch_size, 1)
             features = self.timestep_proj(t_tensor)
 
@@ -140,8 +145,12 @@ class StepConditioningAdapter(nn.Module):
             discrete_feat = self.step_embedding(step_tensor)
             discrete_feat = discrete_feat.expand(batch_size, -1)
 
-            normalized_t = float(step_id) / max(1, num_steps - 1) if num_steps > 1 else 0.0
-            t_tensor = torch.tensor([[normalized_t]], dtype=torch.float32, device=device)
+            normalized_t = (
+                float(step_id) / max(1, num_steps - 1) if num_steps > 1 else 0.0
+            )
+            t_tensor = torch.tensor(
+                [[normalized_t]], dtype=torch.float32, device=device
+            )
             t_tensor = t_tensor.expand(batch_size, 1)
             continuous_feat = self.timestep_proj(t_tensor)
 
@@ -158,6 +167,82 @@ class StepConditioningAdapter(nn.Module):
     ) -> torch.Tensor:
         """Forward pass - alias for get_step_features."""
         return self.get_step_features(step_id, num_steps, batch_size, device)
+
+
+class ContinuousTimeEmbedding(nn.Module):
+    """Continuous time embedding for ODE-based flow matching.
+
+    This module generates sinusoidal time embeddings for continuous time values
+    in the range [0, 1]. Unlike discrete step embeddings, this accepts arbitrary
+    fractional time values, enabling continuous-time ODE solvers.
+
+    Uses sinusoidal position encodings similar to transformers, with frequencies
+    that span multiple orders of magnitude to capture both fast and slow dynamics.
+
+    Args:
+        hidden_size: Dimension of output embeddings (must be even)
+    """
+
+    def __init__(self, hidden_size: int):
+        super().__init__()
+        if hidden_size % 2 != 0:
+            raise ValueError(f"hidden_size must be even, got {hidden_size}")
+        self.hidden_size = hidden_size
+
+    def _get_sinusoidal_embedding(self, t: torch.Tensor) -> torch.Tensor:
+        """Generate sinusoidal time embeddings.
+
+        Args:
+            t: Time values in [0, 1], shape [batch] or scalar
+
+        Returns:
+            Sinusoidal embeddings of shape [batch, hidden_size]
+        """
+        # Ensure t is a 1D tensor
+        if t.dim() == 0:
+            t = t.unsqueeze(0)
+
+        half_dim = self.hidden_size // 2
+        # Create frequency bands spanning multiple orders of magnitude
+        # Using the same pattern as transformer position encodings
+        freqs = torch.exp(
+            torch.arange(half_dim, dtype=torch.float32, device=t.device)
+            * (-math.log(10000.0) / half_dim)
+        )
+
+        # Compute sinusoidal features: sin(t * freq) and cos(t * freq)
+        # t shape: [batch, 1], freqs shape: [half_dim]
+        args = t.unsqueeze(-1) * freqs  # [batch, half_dim]
+
+        # Interleave sin and cos for better coverage
+        sin_emb = torch.sin(args)
+        cos_emb = torch.cos(args)
+
+        # Concatenate sin and cos
+        embedding = torch.cat([sin_emb, cos_emb], dim=-1)
+
+        return embedding
+
+    def forward(self, t: torch.Tensor, *, step_id=None) -> torch.Tensor:
+        """Generate continuous time embeddings.
+
+        Args:
+            t: Time values in [0, 1], shape [batch] or scalar tensor
+            step_id: DEPRECATED - will raise TypeError if provided
+
+        Returns:
+            Time embeddings of shape [batch, hidden_size]
+
+        Raises:
+            TypeError: If step_id parameter is passed (rejects old API)
+        """
+        if step_id is not None:
+            raise TypeError(
+                "ContinuousTimeEmbedding does not accept step_id parameter. "
+                "Use continuous time t in [0, 1] instead."
+            )
+
+        return self._get_sinusoidal_embedding(t)
 
 
 class BoundaryConditioningAdapter(nn.Module):
