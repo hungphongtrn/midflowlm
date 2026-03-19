@@ -639,3 +639,86 @@ class TestCacheLoading:
         assert "input_ids" in loaded
         assert "h_start" in loaded
         assert "h_target" in loaded
+
+
+class TestDatasetFactory:
+    """Test dataset factory dispatching between loaders."""
+
+    def test_dataset_factory_dispatches_to_tinystories_loader(self):
+        """Test that factory dispatches to tinystories loader for legacy configs."""
+        from src.data.dataset_factory import get_experiment_dataloaders
+
+        config = MagicMock()
+        config.data.dataset_name = "roneneldan/TinyStories"
+        config.data.dataset_revision = None
+        config.data.text_field = "text"
+        config.data.seq_len = 128
+        config.data.train_samples = 100
+        config.data.val_samples = 20
+        config.data.num_workers = 0
+        config.data.pin_memory = False
+        config.data.persistent_workers = False
+        config.data.shuffle_seed = 1337
+        config.model.name = "Qwen/Qwen3.5-0.8B"
+        config.model.revision = None
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+        mock_tokenizer.eos_token_id = 1
+
+        with patch("src.data.dataset_factory.get_tinystories_dataloaders") as mock_ts:
+            mock_ts.return_value = {"train": MagicMock(), "val": MagicMock()}
+            result = get_experiment_dataloaders(config, tokenizer=mock_tokenizer)
+            mock_ts.assert_called_once()
+
+    def test_dataset_factory_dispatches_to_mixture_loader(self):
+        """Test that factory dispatches to mixture loader for mixed corpus configs."""
+        from src.data.dataset_factory import get_experiment_dataloaders
+
+        config = MagicMock()
+        config.data.loader = "mixture"
+        config.data.seq_len = 128
+        config.data.num_workers = 0
+        config.data.pin_memory = False
+        config.data.persistent_workers = False
+        config.data.shuffle_seed = 1337
+        config.data.mixture_components = []
+        config.model.name = "Qwen/Qwen3.5-0.8B"
+        config.model.revision = None
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.pad_token_id = 0
+        mock_tokenizer.eos_token_id = 1
+
+        with patch(
+            "src.data.dataset_factory.get_mixed_corpus_dataloaders"
+        ) as mock_mixed:
+            mock_mixed.return_value = {"train": MagicMock(), "val": MagicMock()}
+            result = get_experiment_dataloaders(config, tokenizer=mock_tokenizer)
+            mock_mixed.assert_called_once()
+
+    def test_dataset_factory_raises_on_unknown_loader(self):
+        """Test that factory raises ValueError for unknown loader type."""
+        from src.data.dataset_factory import get_experiment_dataloaders
+
+        config = MagicMock()
+        config.data.loader = "unknown_loader"
+        config.model.name = "Qwen/Qwen3.5-0.8B"
+        config.model.revision = None
+
+        mock_tokenizer = MagicMock()
+
+        with pytest.raises(ValueError, match="Unsupported data.loader"):
+            get_experiment_dataloaders(config, tokenizer=mock_tokenizer)
+
+    def test_dataset_factory_normalizes_config(self):
+        """Test that factory normalizes data config to preserve mixture_components."""
+        from src.data.dataset_factory import normalize_data_config
+
+        raw_config = MagicMock()
+        raw_config.__dict__ = {"mixture_components": [{"name": "test"}]}
+        raw_config.mixture_components = None
+
+        normalized = normalize_data_config(raw_config)
+        assert hasattr(normalized, "mixture_components")
+        assert normalized.mixture_components == [{"name": "test"}]

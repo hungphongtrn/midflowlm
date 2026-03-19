@@ -28,7 +28,7 @@ from src.data.teacher_cache import (
     generate_batch_cache,
     load_metadata,
 )
-from src.data.tinystories import get_tinystories_dataloaders
+from src.data.dataset_factory import get_experiment_dataloaders
 from src.model.qwen_parity import QwenInspector
 
 
@@ -152,7 +152,7 @@ def build_cache_for_split(
 
     # Get dataloaders
     logger.info("Loading dataset...")
-    dataloaders = get_tinystories_dataloaders(
+    dataloaders = get_experiment_dataloaders(
         config=config,
         batch_size=batch_size,
     )
@@ -281,7 +281,7 @@ def build_cache_with_split(
 
     # Get dataloaders
     logger.info("Loading dataset...")
-    dataloaders = get_tinystories_dataloaders(
+    dataloaders = get_experiment_dataloaders(
         config=config,
         batch_size=batch_size,
     )
