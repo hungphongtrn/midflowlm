@@ -20,8 +20,10 @@ import argparse
 import logging
 import random
 import sys
+import json
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, Any, Optional
 
 import torch
 import yaml
@@ -36,13 +38,310 @@ from src.training.trainer import Trainer
 from src.training.data import create_cache_dataloader, get_cache_info
 
 
-def setup_logging(log_level: str = "INFO") -> None:
-    """Setup logging configuration."""
+class StructuredTrainingLogger:
+    """Structured JSON logger for AI debugging of training processes.
+
+    This logger creates a machine-readable log file with events, metrics,
+    and traces that enable AI agents to debug training issues effectively.
+
+    Log format: JSON Lines (.jsonl) with one JSON object per line
+    Each log entry contains:
+    - timestamp: ISO format timestamp
+    - event_type: Type of event (config, step, validation, checkpoint, error, system, summary)
+    - step: Global training step (if applicable)
+    - epoch: Epoch number (if applicable)
+    - data: Event-specific data
+    """
+
+    def __init__(self, log_path: Path):
+        """Initialize the structured logger.
+
+        Args:
+            log_path: Path to the JSONL log file
+        """
+        self.log_path = Path(log_path)
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._step_history: list = []
+        self._error_count = 0
+
+    def _write_event(
+        self,
+        event_type: str,
+        data: Dict[str, Any],
+        step: Optional[int] = None,
+        epoch: Optional[int] = None,
+    ):
+        """Write a structured event to the log file.
+
+        Args:
+            event_type: Type of event
+            data: Event data dictionary
+            step: Optional global step number
+            epoch: Optional epoch number
+        """
+        event = {
+            "timestamp": datetime.now().isoformat(),
+            "event_type": event_type,
+            "data": data,
+        }
+        if step is not None:
+            event["step"] = step
+        if epoch is not None:
+            event["epoch"] = epoch
+
+        with open(self.log_path, "a") as f:
+            f.write(json.dumps(event, default=str) + "\n")
+
+    def log_config(
+        self, config: Dict[str, Any], cli_args: Optional[Dict[str, Any]] = None
+    ):
+        """Log configuration at the start of training.
+
+        Args:
+            config: Training configuration dictionary
+            cli_args: Optional CLI arguments dictionary
+        """
+        event_data = {
+            "config": config,
+            "cli_args": cli_args or {},
+            "python_version": sys.version,
+            "torch_version": torch.__version__,
+            "cuda_available": torch.cuda.is_available(),
+            "cuda_device_count": torch.cuda.device_count()
+            if torch.cuda.is_available()
+            else 0,
+            "cuda_device_name": torch.cuda.get_device_name(0)
+            if torch.cuda.is_available()
+            else None,
+        }
+        self._write_event("config", event_data)
+
+    def log_step(
+        self,
+        step: int,
+        epoch: int,
+        metrics: Dict[str, float],
+        batch_info: Optional[Dict[str, Any]] = None,
+    ):
+        """Log a training step.
+
+        Args:
+            step: Global step number
+            epoch: Current epoch
+            metrics: Dictionary of metrics (loss, lr, etc.)
+            batch_info: Optional batch information (size, T value, etc.)
+        """
+        event_data = {"metrics": metrics, "batch_info": batch_info or {}}
+        self._write_event("step", event_data, step=step, epoch=epoch)
+        self._step_history.append({"step": step, "epoch": epoch, "metrics": metrics})
+
+    def log_validation(
+        self,
+        step: int,
+        epoch: int,
+        metrics: Dict[str, float],
+        perplexity: Optional[float] = None,
+    ):
+        """Log validation results.
+
+        Args:
+            step: Global step number
+            epoch: Current epoch
+            metrics: Validation metrics dictionary
+            perplexity: Optional perplexity value
+        """
+        event_data = {"metrics": metrics, "perplexity": perplexity}
+        self._write_event("validation", event_data, step=step, epoch=epoch)
+
+    def log_checkpoint(
+        self,
+        step: int,
+        epoch: int,
+        checkpoint_path: str,
+        is_best: bool = False,
+        checkpoint_type: str = "full",
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Log checkpoint save event.
+
+        Args:
+            step: Global step number
+            epoch: Current epoch
+            checkpoint_path: Path to saved checkpoint
+            is_best: Whether this is the best checkpoint
+            checkpoint_type: Type of checkpoint (full, midblock_only, etc.)
+            metadata: Optional checkpoint metadata
+        """
+        event_data = {
+            "checkpoint_path": str(checkpoint_path),
+            "is_best": is_best,
+            "checkpoint_type": checkpoint_type,
+            "metadata": metadata or {},
+        }
+        self._write_event("checkpoint", event_data, step=step, epoch=epoch)
+
+    def log_error(
+        self,
+        step: Optional[int],
+        epoch: Optional[int],
+        error_type: str,
+        error_message: str,
+        traceback: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ):
+        """Log an error event.
+
+        Args:
+            step: Global step number (if applicable)
+            epoch: Current epoch (if applicable)
+            error_type: Type of error (exception, nan_loss, etc.)
+            error_message: Error message
+            traceback: Optional traceback string
+            context: Optional context information
+        """
+        self._error_count += 1
+        event_data = {
+            "error_type": error_type,
+            "error_message": error_message,
+            "traceback": traceback,
+            "context": context or {},
+            "error_count": self._error_count,
+        }
+        self._write_event("error", event_data, step=step, epoch=epoch)
+
+    def log_system(
+        self,
+        step: Optional[int],
+        epoch: Optional[int],
+        memory_stats: Optional[Dict[str, Any]] = None,
+        gpu_stats: Optional[Dict[str, Any]] = None,
+        timing: Optional[Dict[str, float]] = None,
+    ):
+        """Log system state.
+
+        Args:
+            step: Global step number
+            epoch: Current epoch
+            memory_stats: Memory statistics
+            gpu_stats: GPU statistics
+            timing: Timing information (step_time, etc.)
+        """
+        event_data = {
+            "memory_stats": memory_stats or {},
+            "gpu_stats": gpu_stats or {},
+            "timing": timing or {},
+        }
+        self._write_event("system", event_data, step=step, epoch=epoch)
+
+    def log_summary(
+        self,
+        total_steps: int,
+        total_epochs: int,
+        final_metrics: Dict[str, Any],
+        best_val_metric: Optional[float] = None,
+        training_duration_seconds: Optional[float] = None,
+    ):
+        """Log training summary at the end.
+
+        Args:
+            total_steps: Total training steps
+            total_epochs: Total epochs completed
+            final_metrics: Final metrics dictionary
+            best_val_metric: Best validation metric achieved
+            training_duration_seconds: Total training duration
+        """
+        event_data = {
+            "total_steps": total_steps,
+            "total_epochs": total_epochs,
+            "final_metrics": final_metrics,
+            "best_val_metric": best_val_metric,
+            "training_duration_seconds": training_duration_seconds,
+            "error_count": self._error_count,
+            "step_count": len(self._step_history),
+        }
+        self._write_event("summary", event_data)
+
+    def log_model_info(
+        self,
+        model_summary: Dict[str, Any],
+        param_summary: Dict[str, int],
+        trainable_params: int,
+        frozen_params: int,
+    ):
+        """Log model information.
+
+        Args:
+            model_summary: Model architecture summary
+            param_summary: Parameter count summary
+            trainable_params: Number of trainable parameters
+            frozen_params: Number of frozen parameters
+        """
+        event_data = {
+            "model_summary": model_summary,
+            "param_summary": param_summary,
+            "trainable_params": trainable_params,
+            "frozen_params": frozen_params,
+            "total_params": trainable_params + frozen_params,
+        }
+        self._write_event("model_info", event_data)
+
+    def log_data_info(
+        self,
+        train_batches: int,
+        val_batches: int,
+        cache_info: Optional[Dict[str, Any]] = None,
+    ):
+        """Log data information.
+
+        Args:
+            train_batches: Number of training batches
+            val_batches: Number of validation batches
+            cache_info: Optional cache information
+        """
+        event_data = {
+            "train_batches": train_batches,
+            "val_batches": val_batches,
+            "cache_info": cache_info or {},
+        }
+        self._write_event("data_info", event_data)
+
+
+def setup_logging(
+    log_level: str = "INFO",
+    log_dir: Optional[str] = None,
+    experiment_name: Optional[str] = None,
+) -> tuple:
+    """Setup logging configuration.
+
+    Args:
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
+        log_dir: Directory for structured JSON logs
+        experiment_name: Experiment name for log file naming
+
+    Returns:
+        Tuple of (logger, structured_logger)
+    """
+    # Setup console/file logging
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+    # Setup structured JSON logger for AI debugging
+    structured_logger = None
+    if log_dir:
+        log_dir_path = Path(log_dir)
+        log_dir_path.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        experiment_part = experiment_name if experiment_name else "unknown"
+        log_file = log_dir_path / f"train_{experiment_part}_{timestamp}.jsonl"
+
+        structured_logger = StructuredTrainingLogger(log_file)
+        logging.info(f"Structured logging to: {log_file}")
+
+    return logging.getLogger(__name__), structured_logger
 
 
 def load_config(config_path: str) -> dict:
@@ -233,20 +532,38 @@ def main():
         help="Resume from checkpoint path",
     )
     parser.add_argument("--log-level", type=str, default="INFO", help="Logging level")
+    parser.add_argument(
+        "--no-structured-logs",
+        action="store_true",
+        help="Disable structured JSON logging",
+    )
 
     args = parser.parse_args()
 
-    # Setup logging
-    setup_logging(args.log_level)
-    logger = logging.getLogger(__name__)
-
-    # Load config
-    logger.info(f"Loading config from {args.config}")
+    # Load config first to get log_dir
     config = load_config(args.config)
 
     # Add timestamp to experiment name
     config = update_config_with_timestamp(config)
+
+    # Determine log directory from config
+    log_config = config.get("logging", {})
+    log_dir = log_config.get("log_dir", "./logs")
+    experiment_name = config.get("experiment_name", "unknown")
+
+    # Setup logging
+    logger, structured_logger = setup_logging(
+        args.log_level,
+        log_dir=None if args.no_structured_logs else log_dir,
+        experiment_name=experiment_name,
+    )
+
+    # Log configuration
+    logger.info(f"Loading config from {args.config}")
     logger.info(f"Experiment name: {config['experiment_name']}")
+
+    if structured_logger:
+        structured_logger.log_config(config=config, cli_args=vars(args))
 
     # Set seed
     seed = config.get("seed", 1337)
@@ -265,67 +582,235 @@ def main():
     cache_dir = cache_config.get("cache_dir", "./cache")
 
     if not Path(cache_dir).exists():
-        logger.error(f"Cache directory not found: {cache_dir}")
+        error_msg = f"Cache directory not found: {cache_dir}"
+        logger.error(error_msg)
         logger.error("Please run scripts/build_teacher_cache.py first")
+        if structured_logger:
+            structured_logger.log_error(
+                step=None,
+                epoch=None,
+                error_type="missing_cache",
+                error_message=error_msg,
+                context={"cache_dir": cache_dir},
+            )
         sys.exit(1)
 
     # Print cache info
+    cache_info_dict = {}
     try:
-        cache_info = get_cache_info(cache_dir)
-        logger.info(f"Cache info: {cache_info}")
+        cache_info_dict = get_cache_info(cache_dir)
+        logger.info(f"Cache info: {cache_info_dict}")
     except Exception as e:
         logger.warning(f"Could not load cache info: {e}")
 
     # Create model
     logger.info("Creating student model...")
-    model = create_student_model(config, device)
+    try:
+        model = create_student_model(config, device)
+    except Exception as e:
+        error_msg = f"Failed to create model: {str(e)}"
+        logger.error(error_msg)
+        import traceback
+
+        tb = traceback.format_exc()
+        if structured_logger:
+            structured_logger.log_error(
+                step=None,
+                epoch=None,
+                error_type="model_creation",
+                error_message=error_msg,
+                traceback=tb,
+                context={"config": config.get("model", {})},
+            )
+        raise
 
     param_summary = model.get_parameter_summary()
     logger.info(f"Model parameters: {param_summary}")
 
+    if structured_logger:
+        # Calculate trainable vs frozen params
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        frozen_params = sum(
+            p.numel() for p in model.parameters() if not p.requires_grad
+        )
+        structured_logger.log_model_info(
+            model_summary={
+                "name": config.get("model", {}).get("name", "unknown"),
+                "start_layer": config.get("replacement_model", {}).get("start_layer"),
+                "end_layer": config.get("replacement_model", {}).get("end_layer"),
+                "max_steps_T": config.get("model", {}).get("max_steps_T"),
+                "device": device,
+            },
+            param_summary=param_summary,
+            trainable_params=trainable_params,
+            frozen_params=frozen_params,
+        )
+
     # Create loss function
     logger.info("Creating loss function...")
-    loss_fn = create_loss_function(config)
-    loss_fn = loss_fn.to(device)
+    try:
+        loss_fn = create_loss_function(config)
+        loss_fn = loss_fn.to(device)
+    except Exception as e:
+        error_msg = f"Failed to create loss function: {str(e)}"
+        logger.error(error_msg)
+        import traceback
+
+        tb = traceback.format_exc()
+        if structured_logger:
+            structured_logger.log_error(
+                step=None,
+                epoch=None,
+                error_type="loss_creation",
+                error_message=error_msg,
+                traceback=tb,
+                context={"config": config.get("loss", {})},
+            )
+        raise
 
     # Create dataloaders
     logger.info("Creating dataloaders...")
-    train_dataloader, val_dataloader = create_dataloaders(config, cache_dir)
+    try:
+        train_dataloader, val_dataloader = create_dataloaders(config, cache_dir)
+    except Exception as e:
+        error_msg = f"Failed to create dataloaders: {str(e)}"
+        logger.error(error_msg)
+        import traceback
+
+        tb = traceback.format_exc()
+        if structured_logger:
+            structured_logger.log_error(
+                step=None,
+                epoch=None,
+                error_type="dataloader_creation",
+                error_message=error_msg,
+                traceback=tb,
+                context={"data_config": config.get("data", {}), "cache_dir": cache_dir},
+            )
+        raise
+
     logger.info(f"Train dataloader: {len(train_dataloader)} batches")
     logger.info(f"Val dataloader: {len(val_dataloader)} batches")
 
+    if structured_logger:
+        structured_logger.log_data_info(
+            train_batches=len(train_dataloader),
+            val_batches=len(val_dataloader),
+            cache_info=cache_info_dict,
+        )
+
     # Create trainer
     logger.info("Creating trainer...")
-    trainer = Trainer(
-        model=model,
-        loss_fn=loss_fn,
-        config=config,
-        device=device,
-        train_dataloader=train_dataloader,
-        val_dataloader=val_dataloader,
-    )
+    try:
+        trainer = Trainer(
+            model=model,
+            loss_fn=loss_fn,
+            config=config,
+            device=device,
+            train_dataloader=train_dataloader,
+            val_dataloader=val_dataloader,
+        )
+    except Exception as e:
+        error_msg = f"Failed to create trainer: {str(e)}"
+        logger.error(error_msg)
+        import traceback
+
+        tb = traceback.format_exc()
+        if structured_logger:
+            structured_logger.log_error(
+                step=None,
+                epoch=None,
+                error_type="trainer_creation",
+                error_message=error_msg,
+                traceback=tb,
+                context={"config": config},
+            )
+        raise
 
     # Resume from checkpoint if specified
     if args.resume_from_checkpoint:
         logger.info(f"Resuming from checkpoint: {args.resume_from_checkpoint}")
-        trainer.load_checkpoint(args.resume_from_checkpoint)
+        try:
+            trainer.load_checkpoint(args.resume_from_checkpoint)
+            if structured_logger:
+                structured_logger.log_checkpoint(
+                    step=trainer.global_step,
+                    epoch=trainer.current_epoch,
+                    checkpoint_path=args.resume_from_checkpoint,
+                    checkpoint_type="resume",
+                    metadata={"source": args.resume_from_checkpoint},
+                )
+        except Exception as e:
+            error_msg = f"Failed to resume from checkpoint: {str(e)}"
+            logger.error(error_msg)
+            import traceback
+
+            tb = traceback.format_exc()
+            if structured_logger:
+                structured_logger.log_error(
+                    step=None,
+                    epoch=None,
+                    error_type="checkpoint_resume",
+                    error_message=error_msg,
+                    traceback=tb,
+                    context={"checkpoint_path": args.resume_from_checkpoint},
+                )
+            raise
 
     # Fast dev run
     if args.fast_dev_run:
         logger.info("Running fast dev loop (1 train step, 1 val step)...")
 
-        # One train step
-        train_batch = next(iter(train_dataloader))
-        train_metrics = trainer.train_step(train_batch)
-        logger.info(f"Train step metrics: {train_metrics}")
+        try:
+            # One train step
+            train_batch = next(iter(train_dataloader))
+            train_metrics = trainer.train_step(train_batch)
+            logger.info(f"Train step metrics: {train_metrics}")
 
-        # One val step
-        val_batch = next(iter(val_dataloader))
-        val_metrics = trainer.val_step(val_batch)
-        logger.info(f"Val step metrics: {val_metrics}")
+            if structured_logger:
+                structured_logger.log_step(
+                    step=trainer.global_step,
+                    epoch=0,
+                    metrics=train_metrics,
+                    batch_info={
+                        "batch_size": train_batch.get(
+                            "input_ids", torch.tensor([])
+                        ).shape[0]
+                    },
+                )
 
-        logger.info("Fast dev run complete!")
+            # One val step
+            val_batch = next(iter(val_dataloader))
+            val_metrics = trainer.val_step(val_batch)
+            logger.info(f"Val step metrics: {val_metrics}")
+
+            if structured_logger:
+                structured_logger.log_validation(
+                    step=trainer.global_step, epoch=0, metrics=val_metrics
+                )
+
+            logger.info("Fast dev run complete!")
+        except Exception as e:
+            error_msg = f"Fast dev run failed: {str(e)}"
+            logger.error(error_msg)
+            import traceback
+
+            tb = traceback.format_exc()
+            if structured_logger:
+                structured_logger.log_error(
+                    step=trainer.global_step,
+                    epoch=trainer.current_epoch,
+                    error_type="fast_dev_run",
+                    error_message=error_msg,
+                    traceback=tb,
+                )
+            raise
         return
+
+    # Track training start time for summary
+    import time
+
+    training_start_time = time.time()
 
     # Limited batch run
     if args.limit_train_batches or args.limit_val_batches:
@@ -334,7 +819,23 @@ def main():
         max_epochs = config.get("train_loop", {}).get("max_epochs", 1)
 
         # Compute baseline perplexity before training
-        baseline_ppl = trainer.compute_baseline_perplexity()
+        try:
+            baseline_ppl = trainer.compute_baseline_perplexity()
+        except Exception as e:
+            error_msg = f"Failed to compute baseline perplexity: {str(e)}"
+            logger.error(error_msg)
+            import traceback
+
+            tb = traceback.format_exc()
+            if structured_logger:
+                structured_logger.log_error(
+                    step=trainer.global_step,
+                    epoch=0,
+                    error_type="baseline_perplexity",
+                    error_message=error_msg,
+                    traceback=tb,
+                )
+            raise
 
         for epoch in range(max_epochs):
             logger.info(f"Epoch {epoch + 1}/{max_epochs}")
@@ -344,21 +845,105 @@ def main():
                 if args.limit_train_batches and batch_idx >= args.limit_train_batches:
                     break
 
-                metrics = trainer.train_step(batch)
+                try:
+                    metrics = trainer.train_step(batch)
 
-                if batch_idx % 10 == 0:
-                    logger.info(
-                        f"  Batch {batch_idx}: loss={metrics['loss']:.4f}, T={metrics['T']}"
-                    )
+                    if batch_idx % 10 == 0:
+                        logger.info(
+                            f"  Batch {batch_idx}: loss={metrics['loss']:.4f}, T={metrics['T']}"
+                        )
+
+                    if structured_logger and batch_idx % 10 == 0:
+                        structured_logger.log_step(
+                            step=trainer.global_step,
+                            epoch=epoch,
+                            metrics=metrics,
+                            batch_info={
+                                "batch_idx": batch_idx,
+                                "batch_size": batch.get(
+                                    "input_ids", torch.tensor([])
+                                ).shape[0],
+                            },
+                        )
+
+                        # Log system stats periodically
+                        if torch.cuda.is_available():
+                            structured_logger.log_system(
+                                step=trainer.global_step,
+                                epoch=epoch,
+                                gpu_stats={
+                                    "allocated_mb": torch.cuda.memory_allocated()
+                                    / 1024**2,
+                                    "reserved_mb": torch.cuda.memory_reserved()
+                                    / 1024**2,
+                                },
+                            )
+
+                except Exception as e:
+                    error_msg = f"Training step failed at batch {batch_idx}: {str(e)}"
+                    logger.error(error_msg)
+                    import traceback
+
+                    tb = traceback.format_exc()
+                    if structured_logger:
+                        structured_logger.log_error(
+                            step=trainer.global_step,
+                            epoch=epoch,
+                            error_type="training_step",
+                            error_message=error_msg,
+                            traceback=tb,
+                            context={"batch_idx": batch_idx},
+                        )
+                    raise
 
             # Validation with limited batches
             logger.info("Running validation...")
-            val_metrics = trainer.validate(max_batches=args.limit_val_batches)
-            logger.info(f"Validation metrics: {val_metrics}")
+            try:
+                val_metrics = trainer.validate(max_batches=args.limit_val_batches)
+                logger.info(f"Validation metrics: {val_metrics}")
+            except Exception as e:
+                error_msg = f"Validation failed: {str(e)}"
+                logger.error(error_msg)
+                import traceback
+
+                tb = traceback.format_exc()
+                if structured_logger:
+                    structured_logger.log_error(
+                        step=trainer.global_step,
+                        epoch=epoch,
+                        error_type="validation",
+                        error_message=error_msg,
+                        traceback=tb,
+                    )
+                raise
 
             # Compute perplexity after epoch
-            epoch_ppl = trainer.compute_epoch_perplexity(epoch + 1)
-            logger.info(f"=== PPL CHANGE: {epoch_ppl - baseline_ppl:+.2f} ===")
+            try:
+                epoch_ppl = trainer.compute_epoch_perplexity(epoch + 1)
+                logger.info(f"=== PPL CHANGE: {epoch_ppl - baseline_ppl:+.2f} ===")
+
+                if structured_logger:
+                    structured_logger.log_validation(
+                        step=trainer.global_step,
+                        epoch=epoch,
+                        metrics=val_metrics,
+                        perplexity=epoch_ppl,
+                    )
+            except Exception as e:
+                error_msg = f"Failed to compute epoch perplexity: {str(e)}"
+                logger.error(error_msg)
+                import traceback
+
+                tb = traceback.format_exc()
+                if structured_logger:
+                    structured_logger.log_error(
+                        step=trainer.global_step,
+                        epoch=epoch,
+                        error_type="epoch_perplexity",
+                        error_message=error_msg,
+                        traceback=tb,
+                    )
+                raise
 
             # Save checkpoint
             checkpoint_dir = Path(
@@ -366,15 +951,108 @@ def main():
             )
             checkpoint_dir.mkdir(parents=True, exist_ok=True)
             checkpoint_path = checkpoint_dir / f"epoch_{epoch + 1}.ckpt"
-            trainer.save_checkpoint(checkpoint_path)
-            logger.info(f"Saved checkpoint to {checkpoint_path}")
+
+            try:
+                trainer.save_checkpoint(checkpoint_path)
+                logger.info(f"Saved checkpoint to {checkpoint_path}")
+
+                if structured_logger:
+                    structured_logger.log_checkpoint(
+                        step=trainer.global_step,
+                        epoch=epoch,
+                        checkpoint_path=str(checkpoint_path),
+                        checkpoint_type="epoch",
+                        metadata={"epoch": epoch + 1},
+                    )
+            except Exception as e:
+                error_msg = f"Failed to save checkpoint: {str(e)}"
+                logger.error(error_msg)
+                import traceback
+
+                tb = traceback.format_exc()
+                if structured_logger:
+                    structured_logger.log_error(
+                        step=trainer.global_step,
+                        epoch=epoch,
+                        error_type="checkpoint_save",
+                        error_message=error_msg,
+                        traceback=tb,
+                        context={"checkpoint_path": str(checkpoint_path)},
+                    )
+                raise
+
+        training_duration = time.time() - training_start_time
+
+        if structured_logger:
+            structured_logger.log_summary(
+                total_steps=trainer.global_step,
+                total_epochs=max_epochs,
+                final_metrics={
+                    "last_val_metrics": val_metrics,
+                    "final_ppl": epoch_ppl if "epoch_ppl" in locals() else None,
+                    "baseline_ppl": baseline_ppl
+                    if "baseline_ppl" in locals()
+                    else None,
+                },
+                best_val_metric=trainer.best_val_metric,
+                training_duration_seconds=training_duration,
+            )
 
         logger.info("Limited batch training complete!")
         return
 
     # Full training
     logger.info("Starting full training...")
-    trainer.fit()
+
+    try:
+        # Compute baseline perplexity
+        baseline_ppl = trainer.compute_baseline_perplexity()
+
+        # Run training - we need to hook into the fit() method for detailed logging
+        # For now, capture what's available after fit()
+        trainer.fit()
+
+        # Log system info after training
+        if structured_logger:
+            final_epoch = trainer.current_epoch
+            final_step = trainer.global_step
+
+            # Log final validation
+            val_metrics = trainer.validate()
+            epoch_ppl = trainer.compute_epoch_perplexity(final_epoch)
+
+            structured_logger.log_validation(
+                step=final_step,
+                epoch=final_epoch,
+                metrics=val_metrics,
+                perplexity=epoch_ppl,
+            )
+
+    except Exception as e:
+        error_msg = f"Training failed: {str(e)}"
+        logger.error(error_msg)
+        import traceback
+
+        tb = traceback.format_exc()
+        if structured_logger:
+            structured_logger.log_error(
+                step=trainer.global_step,
+                epoch=trainer.current_epoch,
+                error_type="training",
+                error_message=error_msg,
+                traceback=tb,
+            )
+
+            # Log partial summary
+            training_duration = time.time() - training_start_time
+            structured_logger.log_summary(
+                total_steps=trainer.global_step,
+                total_epochs=trainer.current_epoch,
+                final_metrics={},
+                best_val_metric=trainer.best_val_metric,
+                training_duration_seconds=training_duration,
+            )
+        raise
 
     # Save final checkpoint
     checkpoint_dir = Path(
@@ -382,8 +1060,48 @@ def main():
     )
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     final_path = checkpoint_dir / "final.ckpt"
-    trainer.save_checkpoint(final_path)
-    logger.info(f"Saved final checkpoint to {final_path}")
+
+    try:
+        trainer.save_checkpoint(final_path)
+        logger.info(f"Saved final checkpoint to {final_path}")
+
+        if structured_logger:
+            structured_logger.log_checkpoint(
+                step=trainer.global_step,
+                epoch=trainer.current_epoch,
+                checkpoint_path=str(final_path),
+                checkpoint_type="final",
+            )
+
+            # Log final summary
+            training_duration = time.time() - training_start_time
+            structured_logger.log_summary(
+                total_steps=trainer.global_step,
+                total_epochs=trainer.current_epoch,
+                final_metrics={
+                    "best_val_metric": trainer.best_val_metric,
+                    "epoch_perplexities": trainer.epoch_ppls
+                    if hasattr(trainer, "epoch_ppls")
+                    else {},
+                },
+                best_val_metric=trainer.best_val_metric,
+                training_duration_seconds=training_duration,
+            )
+    except Exception as e:
+        error_msg = f"Failed to save final checkpoint: {str(e)}"
+        logger.error(error_msg)
+        import traceback
+
+        tb = traceback.format_exc()
+        if structured_logger:
+            structured_logger.log_error(
+                step=trainer.global_step,
+                epoch=trainer.current_epoch,
+                error_type="final_checkpoint_save",
+                error_message=error_msg,
+                traceback=tb,
+            )
+        raise
 
     logger.info("Training complete!")
 
