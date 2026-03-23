@@ -7,12 +7,19 @@ from datasets import load_dataset, DatasetDict, concatenate_datasets
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
 
-def render_mcq_example(example: Dict, component_cfg: Dict) -> str:
+def render_mcq_example(
+    example: Dict,
+    component_cfg: Dict,
+    tokenizer: Optional[PreTrainedTokenizer] = None,
+    use_chat_template: bool = False,
+) -> str:
     """Render a multiple-choice question example as a formatted string.
 
     Args:
         example: Dictionary containing question, choices, and answer
         component_cfg: Component configuration with field names
+        tokenizer: Optional tokenizer for chat template rendering
+        use_chat_template: Whether to format as chat messages with EOS
 
     Returns:
         Formatted MCQ string with question, options, and answer
@@ -23,6 +30,29 @@ def render_mcq_example(example: Dict, component_cfg: Dict) -> str:
     texts = choices["text"]
     answer = example[component_cfg["answer_field"]]
     options = "\n".join(f"{label}. {text}" for label, text in zip(labels, texts))
+
+    if (
+        use_chat_template
+        and tokenizer is not None
+        and getattr(tokenizer, "chat_template", None)
+    ):
+        # Format as chat with explicit instruction to return single letter
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant. Answer multiple choice questions by providing only the letter of the correct answer immediately.",
+            },
+            {
+                "role": "user",
+                "content": f"Question: {question}\n\nOptions:\n{options}\n\nProvide only the answer letter (e.g., A, B, C, or D):",
+            },
+            {"role": "assistant", "content": answer},
+        ]
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=False
+        )
+
+    # Fallback to plain format
     return f"Question: {question}\n\nOptions:\n{options}\n\nAnswer: {answer}"
 
 
@@ -55,7 +85,9 @@ def format_example_text(
         return "\n".join(f"{item['role']}: {item['content']}" for item in messages)
 
     if format_type == "mcq_choices":
-        return render_mcq_example(example, component_cfg)
+        # Check if this component should use chat template for MCQ
+        use_chat_template = component_cfg.get("use_chat_template", False)
+        return render_mcq_example(example, component_cfg, tokenizer, use_chat_template)
 
     raise ValueError(f"Unsupported format_type: {format_type}")
 
@@ -172,6 +204,8 @@ def get_mixed_corpus_dataloaders(
             revision=model_config.revision,
             trust_remote_code=True,
         )
+        # Note: Qwen3.5 already has proper PAD token (<|endoftext|>) distinct from EOS (<|im_end|>)
+        # Only set pad_token if model truly lacks one
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 

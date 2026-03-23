@@ -18,6 +18,27 @@ from unittest.mock import MagicMock, patch, Mock
 import numpy as np
 
 
+def test_format_train_batch_log_includes_kl_loss():
+    """Test that batch log formatting includes KL-related metrics."""
+    from scripts.train_v0 import format_train_batch_log
+
+    message = format_train_batch_log(
+        batch_idx=12,
+        metrics={
+            "loss": 0.1234,
+            "velocity_loss": 0.0123,
+            "kl_loss": 0.4567,
+            "ce_loss": 0.0,
+            "T": 4,
+        },
+    )
+
+    assert message == (
+        "  Batch 12: loss=0.1234, velocity_loss=0.0123, "
+        "kl_loss=0.4567, ce_loss=0.0000, T=4"
+    )
+
+
 def test_deterministic_dataloaders_from_cache():
     """Test that dataloaders from cache are deterministic."""
     from src.training.data import create_cache_dataloader
@@ -162,6 +183,304 @@ def test_one_train_step():
     assert "loss" in metrics
     assert metrics["loss"] != 0  # Loss can be negative, just check it's not zero
     mock_loss_fn.assert_called_once()
+
+
+def test_train_step_computes_online_teacher_logits_for_kl():
+    """Test that KL training can source teacher logits from a live teacher model."""
+    from src.training.trainer import Trainer
+
+    class DummyStudent(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor(1.0))
+
+        def forward(
+            self, input_ids, attention_mask=None, num_steps=None, return_dict=True
+        ):
+            batch_size, seq_len = input_ids.shape
+            logits = self.weight * torch.ones(batch_size, seq_len, 4)
+            endpoint_hidden = self.weight * torch.ones(batch_size, seq_len, 2)
+            trajectory_hidden = self.weight * torch.ones(batch_size, seq_len, 1, 2)
+            return {
+                "endpoint_hidden": endpoint_hidden,
+                "trajectory_hidden": trajectory_hidden,
+                "logits": logits,
+            }
+
+    class DummyTeacher(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.forward_calls = 0
+
+        def forward(
+            self, input_ids, attention_mask=None, num_steps=None, return_dict=True
+        ):
+            self.forward_calls += 1
+            batch_size, seq_len = input_ids.shape
+            logits = torch.full((batch_size, seq_len, 4), 7.0)
+            return {"logits": logits}
+
+    student = DummyStudent()
+    teacher = DummyTeacher()
+    captured = {}
+
+    def loss_side_effect(student_outputs, teacher_batch, T, model=None, t=None):
+        captured["teacher_logits"] = teacher_batch["teacher_logits"].detach().clone()
+        captured["teacher_logits_device"] = teacher_batch["teacher_logits"].device.type
+        loss_val = student_outputs["endpoint_hidden"].mean()
+        metrics = {
+            "total_loss": loss_val.item(),
+            "velocity_loss": 0.0,
+            "endpoint_loss": loss_val.item(),
+            "trajectory_loss": 0.0,
+            "kl_loss": 0.0,
+            "ce_loss": 0.0,
+        }
+        return loss_val, metrics
+
+    batch = {
+        "input_ids": torch.randint(0, 1000, (2, 5)),
+        "attention_mask": torch.ones(2, 5, dtype=torch.int64),
+        "h_start": torch.randn(2, 5, 2),
+        "velocity_target": torch.randn(2, 5, 2),
+        "labels": torch.randint(0, 4, (2, 5)),
+    }
+
+    config = {
+        "optimizer": {
+            "name": "adamw",
+            "learning_rate": 1e-4,
+            "weight_decay": 0.01,
+            "betas": [0.9, 0.95],
+            "eps": 1e-8,
+            "grad_clip_norm": 1.0,
+        },
+        "scheduler": {"name": None},
+        "train_loop": {
+            "precision": "fp32",
+            "accumulate_grad_batches": 1,
+            "sample_continuous_time": False,
+        },
+        "model": {"train_T_values": [1], "train_T_weights": [1.0]},
+        "loss": {
+            "kl_weight": 0.25,
+            "ce_weight": 0.0,
+            "teacher_logits_source": "online",
+        },
+    }
+
+    trainer = Trainer(
+        model=student,
+        loss_fn=Mock(side_effect=loss_side_effect),
+        config=config,
+        device="cpu",
+        teacher_model=teacher,
+    )
+
+    trainer.train_step(batch, T=1)
+
+    assert teacher.forward_calls == 1
+    assert torch.allclose(captured["teacher_logits"], torch.full((2, 5, 4), 7.0))
+    assert captured["teacher_logits_device"] == "cpu"
+    assert trainer._cached_teacher_logits_cpu is None
+
+
+def test_train_step_prefers_live_teacher_logits_over_cached_batch_logits():
+    """Test that live teacher logits replace cached logits when KL is enabled."""
+    from src.training.trainer import Trainer
+
+    class DummyStudent(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor(1.0))
+
+        def forward(
+            self, input_ids, attention_mask=None, num_steps=None, return_dict=True
+        ):
+            batch_size, seq_len = input_ids.shape
+            logits = self.weight * torch.ones(batch_size, seq_len, 4)
+            endpoint_hidden = self.weight * torch.ones(batch_size, seq_len, 2)
+            trajectory_hidden = self.weight * torch.ones(batch_size, seq_len, 1, 2)
+            return {
+                "endpoint_hidden": endpoint_hidden,
+                "trajectory_hidden": trajectory_hidden,
+                "logits": logits,
+            }
+
+    class DummyTeacher(nn.Module):
+        def forward(
+            self, input_ids, attention_mask=None, num_steps=None, return_dict=True
+        ):
+            batch_size, seq_len = input_ids.shape
+            logits = torch.full((batch_size, seq_len, 4), 9.0)
+            return {"logits": logits}
+
+    student = DummyStudent()
+    teacher = DummyTeacher()
+    captured = {}
+
+    def loss_side_effect(student_outputs, teacher_batch, T, model=None, t=None):
+        captured["teacher_logits"] = teacher_batch["teacher_logits"].detach().clone()
+        loss_val = student_outputs["endpoint_hidden"].mean()
+        return loss_val, {"total_loss": loss_val.item()}
+
+    batch = {
+        "input_ids": torch.randint(0, 1000, (2, 4)),
+        "attention_mask": torch.ones(2, 4, dtype=torch.int64),
+        "h_start": torch.randn(2, 4, 2),
+        "velocity_target": torch.randn(2, 4, 2),
+        "labels": torch.randint(0, 4, (2, 4)),
+        "teacher_logits": torch.full((2, 4, 4), -3.0),
+    }
+
+    config = {
+        "optimizer": {
+            "name": "adamw",
+            "learning_rate": 1e-4,
+            "weight_decay": 0.01,
+            "betas": [0.9, 0.95],
+            "eps": 1e-8,
+            "grad_clip_norm": 1.0,
+        },
+        "scheduler": {"name": None},
+        "train_loop": {
+            "precision": "fp32",
+            "accumulate_grad_batches": 1,
+            "sample_continuous_time": False,
+        },
+        "model": {"train_T_values": [1], "train_T_weights": [1.0]},
+        "loss": {
+            "kl_weight": 0.5,
+            "ce_weight": 0.0,
+            "teacher_logits_source": "online",
+        },
+    }
+
+    trainer = Trainer(
+        model=student,
+        loss_fn=Mock(side_effect=loss_side_effect),
+        config=config,
+        device="cpu",
+        teacher_model=teacher,
+    )
+
+    trainer.train_step(batch, T=1)
+
+    assert torch.allclose(captured["teacher_logits"], torch.full((2, 4, 4), 9.0))
+
+
+def test_train_step_skips_live_teacher_when_source_is_cache():
+    """Test that teacher forward is skipped unless source is explicitly online."""
+    from src.training.trainer import Trainer
+
+    class DummyStudent(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor(1.0))
+
+        def forward(
+            self, input_ids, attention_mask=None, num_steps=None, return_dict=True
+        ):
+            batch_size, seq_len = input_ids.shape
+            logits = self.weight * torch.ones(batch_size, seq_len, 4)
+            endpoint_hidden = self.weight * torch.ones(batch_size, seq_len, 2)
+            trajectory_hidden = self.weight * torch.ones(batch_size, seq_len, 1, 2)
+            return {
+                "endpoint_hidden": endpoint_hidden,
+                "trajectory_hidden": trajectory_hidden,
+                "logits": logits,
+            }
+
+    class DummyTeacher(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.forward_calls = 0
+
+        def forward(
+            self, input_ids, attention_mask=None, num_steps=None, return_dict=True
+        ):
+            self.forward_calls += 1
+            batch_size, seq_len = input_ids.shape
+            return {"logits": torch.full((batch_size, seq_len, 4), 11.0)}
+
+    student = DummyStudent()
+    teacher = DummyTeacher()
+    captured = {}
+
+    def loss_side_effect(student_outputs, teacher_batch, T, model=None, t=None):
+        captured["teacher_logits"] = teacher_batch["teacher_logits"].detach().clone()
+        loss_val = student_outputs["endpoint_hidden"].mean()
+        return loss_val, {"total_loss": loss_val.item()}
+
+    batch = {
+        "input_ids": torch.randint(0, 1000, (2, 4)),
+        "attention_mask": torch.ones(2, 4, dtype=torch.int64),
+        "h_start": torch.randn(2, 4, 2),
+        "velocity_target": torch.randn(2, 4, 2),
+        "labels": torch.randint(0, 4, (2, 4)),
+        "teacher_logits": torch.full((2, 4, 4), -5.0),
+    }
+
+    config = {
+        "optimizer": {
+            "name": "adamw",
+            "learning_rate": 1e-4,
+            "weight_decay": 0.01,
+            "betas": [0.9, 0.95],
+            "eps": 1e-8,
+            "grad_clip_norm": 1.0,
+        },
+        "scheduler": {"name": None},
+        "train_loop": {
+            "precision": "fp32",
+            "accumulate_grad_batches": 1,
+            "sample_continuous_time": False,
+        },
+        "model": {"train_T_values": [1], "train_T_weights": [1.0]},
+        "loss": {
+            "kl_weight": 0.5,
+            "ce_weight": 0.0,
+            "teacher_logits_source": "cache",
+        },
+    }
+
+    trainer = Trainer(
+        model=student,
+        loss_fn=Mock(side_effect=loss_side_effect),
+        config=config,
+        device="cpu",
+        teacher_model=teacher,
+    )
+
+    trainer.train_step(batch, T=1)
+
+    assert teacher.forward_calls == 0
+    assert torch.allclose(captured["teacher_logits"], torch.full((2, 4, 4), -5.0))
+
+
+def test_structured_logger_records_teacher_logits_source_metadata():
+    """Test that model metadata explicitly records teacher logits mode."""
+    from scripts.train_v0 import StructuredTrainingLogger
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        log_path = Path(tmpdir) / "train.jsonl"
+        logger = StructuredTrainingLogger(log_path)
+
+        logger.log_model_info(
+            model_summary={
+                "name": "Qwen/Qwen3.5-0.8B",
+                "teacher_logits_source": "online",
+                "uses_online_teacher_logits": True,
+            },
+            param_summary={"total": 10},
+            trainable_params=2,
+            frozen_params=8,
+        )
+
+        event = json.loads(log_path.read_text().strip())
+        assert event["event_type"] == "model_info"
+        assert event["data"]["model_summary"]["teacher_logits_source"] == "online"
+        assert event["data"]["model_summary"]["uses_online_teacher_logits"] is True
 
 
 def test_one_val_step():

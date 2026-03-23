@@ -484,11 +484,13 @@ class DistillationLoss(nn.Module):
         labels: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
-        """Compute cross-entropy loss on labels.
+        """Compute cross-entropy loss on labels for next-token prediction.
+
+        Standard causal LM: logit at position i predicts token at position i+1.
 
         Args:
             student_logits: Student logits [batch, seq, vocab]
-            labels: Target labels [batch, seq]
+            labels: Input_ids (used to extract targets) [batch, seq]
             attention_mask: Attention mask [batch, seq]
 
         Returns:
@@ -501,29 +503,35 @@ class DistillationLoss(nn.Module):
                 "ce": torch.tensor(0.0, device=student_logits.device),
             }
 
-        # Flatten for cross_entropy
         batch_size, seq_len, vocab_size = student_logits.shape
-        logits_flat = student_logits.view(-1, vocab_size)  # [batch*seq, vocab]
-        labels_flat = labels.view(-1)  # [batch*seq]
 
-        # Compute cross-entropy
-        ce_loss = F.cross_entropy(
-            logits_flat,
-            labels_flat,
-            reduction="none",
-        )  # [batch*seq]
+        # Standard next-token prediction:
+        # - Use logits at positions 0..T-1 to predict tokens at positions 1..T
+        # - logits[:, :-1] shape: [batch, seq-1, vocab]
+        # - labels[:, 1:] shape: [batch, seq-1] (target tokens)
+        logits_for_pred = student_logits[:, :-1, :].reshape(
+            -1, vocab_size
+        )  # [batch*(seq-1), vocab]
+        targets = labels[:, 1:].reshape(-1)  # [batch*(seq-1)]
 
-        # Reshape back
-        ce_loss = ce_loss.view(batch_size, seq_len)  # [batch, seq]
-
-        # Apply masking if enabled
+        # Apply attention mask if provided (shifted to align with predictions)
         if self.config.mask_padding_tokens and attention_mask is not None:
-            # Also mask out -100 labels (ignore_index)
-            valid_mask = attention_mask * (labels != -100).float()
-            masked_ce = ce_loss * valid_mask
-            loss = masked_ce.sum() / valid_mask.sum().clamp(min=1.0)
+            # Mask for valid predictions (shift attention mask)
+            pred_mask = attention_mask[:, 1:].reshape(-1).float()  # [batch*(seq-1)]
+
+            # Compute cross-entropy per token
+            ce_loss = F.cross_entropy(
+                logits_for_pred,
+                targets,
+                reduction="none",
+            )  # [batch*(seq-1)]
+
+            # Apply mask
+            masked_ce = ce_loss * pred_mask
+            loss = masked_ce.sum() / pred_mask.sum().clamp(min=1.0)
         else:
-            loss = ce_loss.mean()
+            # Standard mean cross-entropy
+            loss = F.cross_entropy(logits_for_pred, targets)
 
         return {
             "loss": loss,

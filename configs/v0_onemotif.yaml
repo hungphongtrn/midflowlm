@@ -72,6 +72,7 @@ loss:
   endpoint_weight: 0.0
   trajectory_weight: 0.0
   kl_weight: 0.0
+  teacher_logits_source: "none"
   ce_weight: 0.0
   mask_padding_tokens: true
 

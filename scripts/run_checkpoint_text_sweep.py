@@ -88,7 +88,19 @@ Examples:
         type=str,
         default="euler",
         choices=["euler", "rk4", "dopri5", "adaptive_heun", "adaptive_lsoda"],
-        help="ODE solver method formidblock integration.",
+        help="ODE solver method for midblock integration.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="Sampling temperature (0.0 = greedy, >0 = sampling). Higher values increase diversity but may reduce coherence.",
+    )
+    parser.add_argument(
+        "--top-p",
+        type=float,
+        default=1.0,
+        help="Nucleus sampling threshold (1.0 = disabled). Lower values restrict to high-probability tokens.",
     )
     parser.add_argument(
         "--output",
@@ -115,12 +127,16 @@ def main() -> int:
         device=args.device,
         output_path=args.output,
         solver_method=args.solver_method,
+        temperature=args.temperature,
+        top_p=args.top_p,
     )
 
     print(f"Loaded checkpoint: {payload['checkpoint']['path']}")
     print(f"Checkpoint format: {payload['checkpoint']['checkpoint_format']}")
     print(f"Device: {payload['device']}")
     print(f"Solver method: {payload['solver_method']}")
+    print(f"Temperature: {payload['temperature']}")
+    print(f"Top-p: {payload['top_p']}")
     print(f"Prompts: {len(texts)}")
     print(f"Tested num_steps: {payload['num_steps']}")
     print(f"Configured max_steps_T: {payload['max_steps_T']}")

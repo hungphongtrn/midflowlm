@@ -17,6 +17,11 @@ from src.eval.text_checkpoint_sweep import (
     compute_repetition_metrics,
     aggregate_repetition_metrics,
 )
+from src.eval.mmlu_pro_behavior import (
+    extract_first_valid_answer,
+    run_mmlu_pro_behavior_observation,
+    summarize_behavior_records,
+)
 
 __all__ = [
     "IdentityBaseline",
@@ -32,4 +37,7 @@ __all__ = [
     "run_text_sweep",
     "compute_repetition_metrics",
     "aggregate_repetition_metrics",
+    "extract_first_valid_answer",
+    "run_mmlu_pro_behavior_observation",
+    "summarize_behavior_records",
 ]

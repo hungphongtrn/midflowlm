@@ -49,6 +49,7 @@ class Trainer:
         device: Union[str, torch.device] = "cuda",
         train_dataloader: Optional[Any] = None,
         val_dataloader: Optional[Any] = None,
+        teacher_model: Optional[nn.Module] = None,
     ):
         self.model = model
         self.loss_fn = loss_fn
@@ -56,6 +57,7 @@ class Trainer:
         self.device = torch.device(device) if isinstance(device, str) else device
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
+        self.teacher_model = teacher_model
 
         # Training state
         self.global_step = 0
@@ -67,6 +69,18 @@ class Trainer:
         self.scheduler_config = config.get("scheduler", {})
         self.train_loop_config = config.get("train_loop", {})
         self.model_config = config.get("model", {})
+        self.loss_config = config.get("loss", {})
+        self.kl_weight = float(self.loss_config.get("kl_weight", 0.0))
+        self.teacher_logits_source = self.loss_config.get(
+            "teacher_logits_source",
+            "cache" if self.kl_weight > 0.0 else "none",
+        )
+        self._cached_teacher_logits_cpu = None
+
+        if self.teacher_model is not None:
+            self.teacher_model.eval()
+            for param in self.teacher_model.parameters():
+                param.requires_grad = False
 
         # Setup precision
         self._setup_precision()
@@ -110,6 +124,100 @@ class Trainer:
         logger.info(f"  AMP enabled: {self.use_amp}")
         logger.info(f"  Gradient accumulation: {self.accumulate_grad_batches}")
         logger.info(f"  Train T values: {self.train_T_values}")
+        logger.info(f"  Online teacher KL: {self.uses_online_teacher_logits()}")
+
+    def uses_online_teacher_logits(self) -> bool:
+        """Return whether KL logits should be recomputed from a live teacher."""
+        return (
+            self.teacher_model is not None
+            and self.kl_weight > 0.0
+            and self.teacher_logits_source == "online"
+        )
+
+    def _autocast_context(self):
+        """Create autocast context for CUDA mixed precision, if enabled."""
+        if not self.use_amp or self.device.type != "cuda":
+            return None
+
+        return (
+            torch.amp.autocast("cuda", dtype=self.amp_dtype)
+            if hasattr(torch, "amp")
+            else torch.cuda.amp.autocast(dtype=self.amp_dtype)
+        )
+
+    def _compute_teacher_logits_cpu(
+        self, batch: Dict[str, torch.Tensor]
+    ) -> Optional[torch.Tensor]:
+        """Run the frozen teacher first and keep logits on CPU until student loss."""
+        if not self.uses_online_teacher_logits():
+            return None
+
+        teacher_device = (
+            self.device if self.device.type == "cuda" else torch.device("cpu")
+        )
+        self.model.to("cpu")
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+
+        try:
+            self.teacher_model.to(teacher_device)
+            self.teacher_model.eval()
+
+            teacher_inputs = {
+                "input_ids": batch["input_ids"].to(teacher_device),
+                "attention_mask": (
+                    batch["attention_mask"].to(teacher_device)
+                    if "attention_mask" in batch
+                    else None
+                ),
+            }
+
+            with torch.no_grad():
+                autocast_context = self._autocast_context()
+                if autocast_context is not None:
+                    with autocast_context:
+                        teacher_outputs = self.teacher_model(
+                            input_ids=teacher_inputs["input_ids"],
+                            attention_mask=teacher_inputs["attention_mask"],
+                            return_dict=True,
+                        )
+                else:
+                    teacher_outputs = self.teacher_model(
+                        input_ids=teacher_inputs["input_ids"],
+                        attention_mask=teacher_inputs["attention_mask"],
+                        return_dict=True,
+                    )
+
+            if isinstance(teacher_outputs, dict):
+                teacher_logits = teacher_outputs["logits"]
+            else:
+                teacher_logits = teacher_outputs.logits
+
+            self._cached_teacher_logits_cpu = teacher_logits.detach().to("cpu")
+            return self._cached_teacher_logits_cpu
+        finally:
+            self.teacher_model.to("cpu")
+            self.model.to(self.device)
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+
+    def _prepare_batch(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Move batch tensors to the student device and attach live teacher logits."""
+        prepared_batch = {
+            k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+            for k, v in batch.items()
+        }
+
+        if self._cached_teacher_logits_cpu is not None:
+            prepared_batch["teacher_logits"] = self._cached_teacher_logits_cpu.to(
+                self.device
+            )
+
+        return prepared_batch
+
+    def _clear_cached_teacher_logits(self) -> None:
+        """Drop any per-batch cached teacher logits after the step completes."""
+        self._cached_teacher_logits_cpu = None
 
     def _setup_precision(self):
         """Setup precision settings for training."""
@@ -284,33 +392,40 @@ class Trainer:
         # Sample T if not provided
         if T is None:
             T = self.sample_T()
+        try:
+            self._compute_teacher_logits_cpu(batch)
+            batch = self._prepare_batch(batch)
 
-        # Move batch to device
-        batch = {
-            k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-            for k, v in batch.items()
-        }
-
-        # Sample continuous time if enabled
-        sample_continuous_time = self.train_loop_config.get(
-            "sample_continuous_time", False
-        )
-        if sample_continuous_time:
-            batch_size = batch["input_ids"].shape[0]
-            t = self.sample_continuous_time(batch_size, self.device)
-            logger.debug(f"Sampled continuous time t: {t}")
-        else:
-            t = None
-
-        # Forward pass with optional AMP
-        if self.use_amp:
-            # Use torch.amp.autocast for newer PyTorch, fallback to torch.cuda.amp.autocast
-            autocast_context = (
-                torch.amp.autocast("cuda", dtype=self.amp_dtype)
-                if hasattr(torch, "amp")
-                else torch.cuda.amp.autocast(dtype=self.amp_dtype)
+            # Sample continuous time if enabled
+            sample_continuous_time = self.train_loop_config.get(
+                "sample_continuous_time", False
             )
-            with autocast_context:
+            if sample_continuous_time:
+                batch_size = batch["input_ids"].shape[0]
+                t = self.sample_continuous_time(batch_size, self.device)
+                logger.debug(f"Sampled continuous time t: {t}")
+            else:
+                t = None
+
+            # Forward pass with optional AMP
+            autocast_context = self._autocast_context()
+            if autocast_context is not None:
+                with autocast_context:
+                    student_outputs = self.model(
+                        input_ids=batch["input_ids"],
+                        attention_mask=batch.get("attention_mask"),
+                        num_steps=T,
+                        return_dict=True,
+                    )
+
+                    total_loss, loss_metrics = self.loss_fn(
+                        student_outputs=student_outputs,
+                        teacher_batch=batch,
+                        T=T,
+                        model=self.model,
+                        t=t,
+                    )
+            else:
                 student_outputs = self.model(
                     input_ids=batch["input_ids"],
                     attention_mask=batch.get("attention_mask"),
@@ -318,7 +433,6 @@ class Trainer:
                     return_dict=True,
                 )
 
-                # Compute loss
                 total_loss, loss_metrics = self.loss_fn(
                     student_outputs=student_outputs,
                     teacher_batch=batch,
@@ -326,76 +440,60 @@ class Trainer:
                     model=self.model,
                     t=t,
                 )
-        else:
-            student_outputs = self.model(
-                input_ids=batch["input_ids"],
-                attention_mask=batch.get("attention_mask"),
-                num_steps=T,
-                return_dict=True,
-            )
 
-            # Compute loss
-            total_loss, loss_metrics = self.loss_fn(
-                student_outputs=student_outputs,
-                teacher_batch=batch,
-                T=T,
-                model=self.model,
-                t=t,
-            )
+            # Scale loss for gradient accumulation
+            if self.accumulate_grad_batches > 1:
+                total_loss = total_loss / self.accumulate_grad_batches
 
-        # Scale loss for gradient accumulation
-        if self.accumulate_grad_batches > 1:
-            total_loss = total_loss / self.accumulate_grad_batches
-
-        # Backward pass
-        if self.use_amp:
-            self.scaler.scale(total_loss).backward()
-        else:
-            total_loss.backward()
-
-        self.accumulation_step += 1
-
-        # Optimizer step if accumulation is complete
-        if self.accumulation_step >= self.accumulate_grad_batches:
-            if self.grad_clip_norm > 0:
-                if self.use_amp:
-                    self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.grad_clip_norm,
-                )
-
+            # Backward pass
             if self.use_amp:
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+                self.scaler.scale(total_loss).backward()
             else:
-                self.optimizer.step()
+                total_loss.backward()
 
-            self.optimizer.zero_grad()
-            self.accumulation_step = 0
-            self.global_step += 1
+            self.accumulation_step += 1
 
-            # Scheduler step
-            if self.scheduler is not None:
-                self.scheduler.step()
+            # Optimizer step if accumulation is complete
+            if self.accumulation_step >= self.accumulate_grad_batches:
+                if self.grad_clip_norm > 0:
+                    if self.use_amp:
+                        self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.grad_clip_norm,
+                    )
 
-        # Prepare metrics
-        metrics = {
-            "loss": loss_metrics.get("total_loss", total_loss.item()),
-            "velocity_loss": loss_metrics.get("velocity_loss", 0.0),
-            "endpoint_loss": loss_metrics.get("endpoint_loss", 0.0),
-            "trajectory_loss": loss_metrics.get("trajectory_loss", 0.0),
-            "kl_loss": loss_metrics.get("kl_loss", 0.0),
-            "ce_loss": loss_metrics.get("ce_loss", 0.0),
-            "T": T,
-            "lr": self.optimizer.param_groups[0]["lr"],
-        }
+                if self.use_amp:
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    self.optimizer.step()
 
-        if sample_continuous_time and t is not None:
-            metrics["t_mean"] = t.mean().item()
-            metrics["t_std"] = t.std().item()
+                self.optimizer.zero_grad()
+                self.accumulation_step = 0
+                self.global_step += 1
 
-        return metrics
+                if self.scheduler is not None:
+                    self.scheduler.step()
+
+            metrics = {
+                "loss": loss_metrics.get("total_loss", total_loss.item()),
+                "velocity_loss": loss_metrics.get("velocity_loss", 0.0),
+                "endpoint_loss": loss_metrics.get("endpoint_loss", 0.0),
+                "trajectory_loss": loss_metrics.get("trajectory_loss", 0.0),
+                "kl_loss": loss_metrics.get("kl_loss", 0.0),
+                "ce_loss": loss_metrics.get("ce_loss", 0.0),
+                "T": T,
+                "lr": self.optimizer.param_groups[0]["lr"],
+            }
+
+            if sample_continuous_time and t is not None:
+                metrics["t_mean"] = t.mean().item()
+                metrics["t_std"] = t.std().item()
+
+            return metrics
+        finally:
+            self._clear_cached_teacher_logits()
 
     def val_step(
         self, batch: Dict[str, torch.Tensor], T: Optional[int] = None
@@ -414,33 +512,38 @@ class Trainer:
         # Sample T if not provided
         if T is None:
             T = self.sample_T()
+        try:
+            self._compute_teacher_logits_cpu(batch)
+            batch = self._prepare_batch(batch)
 
-        # Move batch to device
-        batch = {
-            k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-            for k, v in batch.items()
-        }
+            sample_continuous_time = self.train_loop_config.get(
+                "sample_continuous_time", False
+            )
+            if sample_continuous_time:
+                batch_size = batch["input_ids"].shape[0]
+                t = self.sample_continuous_time(batch_size, self.device)
+            else:
+                t = None
 
-        # Sample continuous time if enabled
-        sample_continuous_time = self.train_loop_config.get(
-            "sample_continuous_time", False
-        )
-        if sample_continuous_time:
-            batch_size = batch["input_ids"].shape[0]
-            t = self.sample_continuous_time(batch_size, self.device)
-        else:
-            t = None
+            with torch.no_grad():
+                autocast_context = self._autocast_context()
+                if autocast_context is not None:
+                    with autocast_context:
+                        student_outputs = self.model(
+                            input_ids=batch["input_ids"],
+                            attention_mask=batch.get("attention_mask"),
+                            num_steps=T,
+                            return_dict=True,
+                        )
 
-        with torch.no_grad():
-            # Forward pass with optional AMP
-            if self.use_amp:
-                # Use torch.amp.autocast for newer PyTorch, fallback to torch.cuda.amp.autocast
-                autocast_context = (
-                    torch.amp.autocast("cuda", dtype=self.amp_dtype)
-                    if hasattr(torch, "amp")
-                    else torch.cuda.amp.autocast(dtype=self.amp_dtype)
-                )
-                with autocast_context:
+                        total_loss, loss_metrics = self.loss_fn(
+                            student_outputs=student_outputs,
+                            teacher_batch=batch,
+                            T=T,
+                            model=self.model,
+                            t=t,
+                        )
+                else:
                     student_outputs = self.model(
                         input_ids=batch["input_ids"],
                         attention_mask=batch.get("attention_mask"),
@@ -448,7 +551,6 @@ class Trainer:
                         return_dict=True,
                     )
 
-                    # Compute loss
                     total_loss, loss_metrics = self.loss_fn(
                         student_outputs=student_outputs,
                         teacher_batch=batch,
@@ -456,35 +558,20 @@ class Trainer:
                         model=self.model,
                         t=t,
                     )
-            else:
-                student_outputs = self.model(
-                    input_ids=batch["input_ids"],
-                    attention_mask=batch.get("attention_mask"),
-                    num_steps=T,
-                    return_dict=True,
-                )
 
-                # Compute loss
-                total_loss, loss_metrics = self.loss_fn(
-                    student_outputs=student_outputs,
-                    teacher_batch=batch,
-                    T=T,
-                    model=self.model,
-                    t=t,
-                )
+            metrics = {
+                "loss": loss_metrics.get("total_loss", total_loss.item()),
+                "velocity_loss": loss_metrics.get("velocity_loss", 0.0),
+                "endpoint_loss": loss_metrics.get("endpoint_loss", 0.0),
+                "trajectory_loss": loss_metrics.get("trajectory_loss", 0.0),
+                "kl_loss": loss_metrics.get("kl_loss", 0.0),
+                "ce_loss": loss_metrics.get("ce_loss", 0.0),
+                "T": T,
+            }
 
-        # Prepare metrics
-        metrics = {
-            "loss": loss_metrics.get("total_loss", total_loss.item()),
-            "velocity_loss": loss_metrics.get("velocity_loss", 0.0),
-            "endpoint_loss": loss_metrics.get("endpoint_loss", 0.0),
-            "trajectory_loss": loss_metrics.get("trajectory_loss", 0.0),
-            "kl_loss": loss_metrics.get("kl_loss", 0.0),
-            "ce_loss": loss_metrics.get("ce_loss", 0.0),
-            "T": T,
-        }
-
-        return metrics
+            return metrics
+        finally:
+            self._clear_cached_teacher_logits()
 
     def validate(
         self, dataloader: Optional[Any] = None, max_batches: Optional[int] = None
@@ -689,6 +776,11 @@ class Trainer:
                 if self.global_step % self.log_every_n_steps == 0:
                     log_str = f"Step {self.global_step}: "
                     log_str += f"loss={metrics['loss']:.4f}, "
+                    log_str += (
+                        f"velocity_loss={metrics.get('velocity_loss', 0.0):.4f}, "
+                    )
+                    log_str += f"kl_loss={metrics.get('kl_loss', 0.0):.4f}, "
+                    log_str += f"ce_loss={metrics.get('ce_loss', 0.0):.4f}, "
                     log_str += f"T={metrics['T']}, "
                     log_str += f"lr={metrics['lr']:.6f}"
                     logger.info(log_str)

@@ -5,7 +5,7 @@ status: completed
 type: task
 priority: normal
 created_at: 2026-03-21T08:13:07Z
-updated_at: 2026-03-21T08:44:14Z
+updated_at: 2026-03-21T09:46:54Z
 ---
 
 Design and decompose the next KL follow-up work.
@@ -20,3 +20,8 @@ Design and decompose the next KL follow-up work.
 - Wrote the reviewed implementation plan at docs/superpowers/plans/2026-03-21-kl-follow-up-progressive-disclosure.md.
 - Structured the work as progressive-disclosure packets for inference probing, long-context config plus cache contract, and teacher-state sourcing refactor.
 - Created follow-up execution beans: midflowlm-zpgo, midflowlm-odi4, and midflowlm-hbqg.
+
+
+## Execution Tracking
+
+Execution is being tracked in packet beans `midflowlm-44or`, `midflowlm-zi64`, and `midflowlm-5bxr` because beans only allow task children under milestone/epic/feature parents.

@@ -185,7 +185,22 @@ def greedy_generate(
     max_new_tokens: int,
     stop_on_eos: bool = True,
     solver_method: str = "euler",
+    temperature: float = 0.0,
+    top_p: float = 1.0,
 ) -> SweepResult:
+    """Generate text with optional temperature sampling.
+
+    Args:
+        model: The student model
+        tokenizer: Tokenizer
+        prompt: Input prompt
+        num_steps: Number of ODE solver steps
+        max_new_tokens: Maximum tokens to generate
+        stop_on_eos: Whether to stop at EOS token
+        solver_method: ODE solver method
+        temperature: Sampling temperature (0 = greedy, >0 = sample)
+        top_p: Nucleus sampling threshold (1.0 = disabled)
+    """
     encoded = tokenizer(prompt, return_tensors="pt")
     input_ids = encoded["input_ids"].to(model.device)
     attention_mask = encoded["attention_mask"].to(model.device)
@@ -203,7 +218,34 @@ def greedy_generate(
                 num_steps=num_steps,
                 solver_method=solver_method,
             )
-            next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)
+            next_token_logits = logits[:, -1, :]
+
+            # Apply temperature sampling if temperature > 0
+            if temperature > 0:
+                probs = torch.softmax(next_token_logits / temperature, dim=-1)
+
+                # Apply top-p (nucleus) filtering
+                if top_p < 1.0:
+                    sorted_probs, sorted_indices = torch.sort(
+                        probs, descending=True, dim=-1
+                    )
+                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+                    # Remove tokens with cumulative probability above threshold
+                    sorted_indices_to_remove = cumulative_probs > top_p
+                    # Keep at least one token
+                    sorted_indices_to_remove[..., 0] = False
+
+                    indices_to_remove = sorted_indices_to_remove.scatter(
+                        -1, sorted_indices, sorted_indices_to_remove
+                    )
+                    probs = probs.masked_fill(indices_to_remove, 0.0)
+                    probs = probs / probs.sum(dim=-1, keepdim=True)
+
+                next_token = torch.multinomial(probs, num_samples=1)
+            else:
+                next_token = next_token_logits.argmax(dim=-1, keepdim=True)
+
             next_token_id = int(next_token.item())
             completion_token_ids.append(next_token_id)
 
@@ -261,6 +303,8 @@ def build_comparison_rows(
     num_steps: list[int],
     max_new_tokens: int,
     solver_method: str = "euler",
+    temperature: float = 0.0,
+    top_p: float = 1.0,
 ) -> list[dict[str, Any]]:
     rows = []
     for text in texts:
@@ -272,6 +316,8 @@ def build_comparison_rows(
                 num_steps=1,
                 max_new_tokens=max_new_tokens,
                 solver_method="euler",
+                temperature=temperature,
+                top_p=top_p,
             )
         )
         trained_results = {
@@ -283,6 +329,8 @@ def build_comparison_rows(
                     num_steps=step_count,
                     max_new_tokens=max_new_tokens,
                     solver_method=solver_method,
+                    temperature=temperature,
+                    top_p=top_p,
                 )
             )
             for step_count in num_steps
@@ -344,6 +392,8 @@ def run_text_sweep(
     device: str,
     output_path: Optional[str | Path] = None,
     solver_method: str = "euler",
+    temperature: float = 0.0,
+    top_p: float = 1.0,
 ) -> dict[str, Any]:
     config = load_config(config_path)
     max_steps_T = int(config["model"]["max_steps_T"])
@@ -362,6 +412,8 @@ def run_text_sweep(
         num_steps=num_steps,
         max_new_tokens=max_new_tokens,
         solver_method=solver_method,
+        temperature=temperature,
+        top_p=top_p,
     )
     table = build_text_table(comparisons, num_steps)
 
@@ -373,6 +425,8 @@ def run_text_sweep(
         "num_steps": num_steps,
         "max_steps_T": max_steps_T,
         "solver_method": solver_method,
+        "temperature": temperature,
+        "top_p": top_p,
         "warnings": warnings,
         "comparisons": comparisons,
         "repetition_metrics": aggregate_repetition_metrics(comparisons),

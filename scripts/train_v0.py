@@ -38,6 +38,28 @@ from src.training.trainer import Trainer
 from src.training.data import create_cache_dataloader, get_cache_info
 
 
+def format_train_batch_log(batch_idx: int, metrics: Dict[str, float]) -> str:
+    """Format a training batch log line with loss components."""
+    return (
+        f"  Batch {batch_idx}: "
+        f"loss={metrics.get('loss', 0.0):.4f}, "
+        f"velocity_loss={metrics.get('velocity_loss', 0.0):.4f}, "
+        f"kl_loss={metrics.get('kl_loss', 0.0):.4f}, "
+        f"ce_loss={metrics.get('ce_loss', 0.0):.4f}, "
+        f"T={metrics.get('T', 0)}"
+    )
+
+
+def get_teacher_logits_source(config: Dict[str, Any]) -> str:
+    """Resolve how KL teacher logits should be sourced for this run."""
+    loss_config = config.get("loss", {})
+    kl_weight = float(loss_config.get("kl_weight", 0.0))
+    return loss_config.get(
+        "teacher_logits_source",
+        "cache" if kl_weight > 0.0 else "none",
+    )
+
+
 class StructuredTrainingLogger:
     """Structured JSON logger for AI debugging of training processes.
 
@@ -444,6 +466,32 @@ def create_student_model(config: dict, device: str) -> FrozenQwenStudent:
     return model
 
 
+def create_teacher_model(config: dict) -> FrozenQwenStudent:
+    """Create the frozen original model used for online KL logits."""
+    model_config = config["model"]
+    replacement_config = config["replacement_model"]
+
+    train_loop_config = config.get("train_loop", {})
+    precision = train_loop_config.get("precision", "fp32")
+
+    if precision == "bf16-mixed":
+        dtype = torch.bfloat16
+    elif precision == "fp16-mixed":
+        dtype = torch.float16
+    else:
+        dtype = torch.float32
+
+    return FrozenQwenStudent(
+        model_name=model_config["name"],
+        start_layer=replacement_config["start_layer"],
+        end_layer=replacement_config["end_layer"],
+        max_steps_T=model_config["max_steps_T"],
+        device="cpu",
+        dtype=dtype,
+        bypass_mode=True,
+    )
+
+
 def create_loss_function(config: dict) -> DistillationLoss:
     """Create the loss function from config.
 
@@ -624,6 +672,29 @@ def main():
             )
         raise
 
+    teacher_model = None
+    teacher_logits_source = get_teacher_logits_source(config)
+    if teacher_logits_source == "online":
+        logger.info("Creating frozen teacher model for online KL logits...")
+        try:
+            teacher_model = create_teacher_model(config)
+        except Exception as e:
+            error_msg = f"Failed to create teacher model: {str(e)}"
+            logger.error(error_msg)
+            import traceback
+
+            tb = traceback.format_exc()
+            if structured_logger:
+                structured_logger.log_error(
+                    step=None,
+                    epoch=None,
+                    error_type="teacher_model_creation",
+                    error_message=error_msg,
+                    traceback=tb,
+                    context={"config": config.get("model", {})},
+                )
+            raise
+
     param_summary = model.get_parameter_summary()
     logger.info(f"Model parameters: {param_summary}")
 
@@ -640,6 +711,8 @@ def main():
                 "end_layer": config.get("replacement_model", {}).get("end_layer"),
                 "max_steps_T": config.get("model", {}).get("max_steps_T"),
                 "device": device,
+                "teacher_logits_source": teacher_logits_source,
+                "uses_online_teacher_logits": teacher_logits_source == "online",
             },
             param_summary=param_summary,
             trainable_params=trainable_params,
@@ -709,6 +782,7 @@ def main():
             device=device,
             train_dataloader=train_dataloader,
             val_dataloader=val_dataloader,
+            teacher_model=teacher_model,
         )
     except Exception as e:
         error_msg = f"Failed to create trainer: {str(e)}"
@@ -849,9 +923,7 @@ def main():
                     metrics = trainer.train_step(batch)
 
                     if batch_idx % 10 == 0:
-                        logger.info(
-                            f"  Batch {batch_idx}: loss={metrics['loss']:.4f}, T={metrics['T']}"
-                        )
+                        logger.info(format_train_batch_log(batch_idx, metrics))
 
                     if structured_logger and batch_idx % 10 == 0:
                         structured_logger.log_step(

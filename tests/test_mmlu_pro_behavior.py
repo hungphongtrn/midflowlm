@@ -1,6 +1,7 @@
 import pytest
 
 from src.eval.mmlu_pro_behavior import (
+    PromptBehavior,
     build_behavior_record,
     create_mmlu_pro_prompt,
     extract_first_valid_answer,
@@ -105,26 +106,33 @@ def test_summarize_behavior_records_counts_hits_and_common_outputs():
     assert group["top_first_generated_texts"][0] == ["The", 2]
     assert group["top_answer_letters"][0] == ["C", 2]
     assert len(group["example_completions"]) == 1
-def test_create_mmlu_pro_prompt_default_behavior():
-    """Test that default mode (no argument) produces thinking tags."""
+
+
+def test_create_mmlu_pro_prompt_default_behavior(mock_tokenizer):
+    """Test that default mode preserves the prompt unchanged (no extra prefixes)."""
     prompt = create_mmlu_pro_prompt(
         "What is 2+2?",
         ["A: 1", "B: 2", "C: 3", "D: 4"],
         mock_tokenizer,
     )
-    # Default should include thinking tags (same as closed_think)
-    assert "<think>" in prompt
+    expected_suffix = "<|im_start|>assistant\n"
+    assert prompt.endswith(expected_suffix), (
+        f"DEFAULT prompt should end with {repr(expected_suffix)}, got {repr(prompt[-50:])}"
+    )
+    assert "<think>" not in prompt, "DEFAULT prompt should not have thinking tags"
+
 
 def test_create_mmlu_pro_prompt_supports_closed_think_prefill():
     """Test that closed_think mode produces assistant prefill with thinking tags."""
     from unittest.mock import MagicMock
+
     mock_tok = MagicMock()
     mock_tok.apply_chat_template.return_value = "Question: What is 2+2?\n\nAnswer:"
     prompt = create_mmlu_pro_prompt(
         "What is 2+2?",
         ["A: 1", "B: 2", "C: 3", "D: 4"],
         mock_tok,
-        prompt_behavior="closed_think",
+        prompt_behavior=PromptBehavior.CLOSED_THINK,
     )
     expected = "<|im_start|>assistant\n<think>\n"
     assert expected in prompt, f"Expected {repr(expected)} in prompt"
@@ -133,26 +141,13 @@ def test_create_mmlu_pro_prompt_supports_closed_think_prefill():
 def test_create_mmlu_pro_prompt_supports_stripped_prefill():
     """Test that stripped mode produces prompt without thinking tags."""
     from unittest.mock import MagicMock
+
     mock_tok = MagicMock()
     mock_tok.apply_chat_template.return_value = "Question: What is 2+2?\n\nAnswer:"
     prompt = create_mmlu_pro_prompt(
         "What is 2+2?",
         ["A: 1", "B: 2", "C: 3", "D: 4"],
         mock_tok,
-        prompt_behavior="stripped",
+        prompt_behavior=PromptBehavior.STRIPPED,
     )
     assert "<think>" not in prompt
-
-
-def test_create_mmlu_pro_prompt_default_behavior():
-    """Test that default mode (no argument) produces thinking tags."""
-    from unittest.mock import MagicMock
-    mock_tok = MagicMock()
-    mock_tok.apply_chat_template.return_value = "Question: What is 2+2?\n\nAnswer:"
-    prompt = create_mmlu_pro_prompt(
-        "What is 2+2?",
-        ["A: 1", "B: 2", "C: 3", "D: 4"],
-        mock_tok,
-    )
-    # Default should include thinking tags (same as closed_think)
-    assert "<think>" in prompt

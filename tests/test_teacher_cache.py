@@ -722,3 +722,221 @@ class TestDatasetFactory:
         normalized = normalize_data_config(raw_config)
         assert hasattr(normalized, "mixture_components")
         assert normalized.mixture_components == [{"name": "test"}]
+
+
+class TestCacheCompatibility:
+    """Test offline cache compatibility validation.
+
+    These tests verify that a helper in src/training/data.py validates
+    offline cache metadata against the active config before dataloaders
+    are created.
+    """
+
+    def test_cache_compatibility_rejects_model_name_mismatch(self, temp_cache_dir):
+        """Test that compatibility validator rejects cache with different model_name."""
+        from src.training.data import validate_cache_compatibility
+        from src.data.teacher_cache import CacheMetadata
+
+        metadata = CacheMetadata(
+            model_name="different-model",
+            model_revision=None,
+            start_layer=8,
+            end_layer=11,
+            span_depth=4,
+            seq_len=128,
+            store_logits=False,
+            num_samples=100,
+        )
+
+        config = {
+            "model": {"name": "Qwen/Qwen3.5-0.8B"},
+            "replacement_model": {"start_layer": 8, "end_layer": 11},
+            "data": {"seq_len": 128},
+            "loss": {"kl_weight": 0.0},
+        }
+
+        with pytest.raises(ValueError, match="model_name"):
+            validate_cache_compatibility(config, metadata)
+
+    def test_cache_compatibility_rejects_model_revision_mismatch(self, temp_cache_dir):
+        """Test that compatibility validator rejects cache with different model_revision."""
+        from src.training.data import validate_cache_compatibility
+        from src.data.teacher_cache import CacheMetadata
+
+        metadata = CacheMetadata(
+            model_name="Qwen/Qwen3.5-0.8B",
+            model_revision="old_commit",
+            start_layer=8,
+            end_layer=11,
+            span_depth=4,
+            seq_len=128,
+            store_logits=False,
+            num_samples=100,
+        )
+
+        config = {
+            "model": {"name": "Qwen/Qwen3.5-0.8B", "revision": "new_commit"},
+            "replacement_model": {"start_layer": 8, "end_layer": 11},
+            "data": {"seq_len": 128},
+            "loss": {"kl_weight": 0.0},
+        }
+
+        with pytest.raises(ValueError, match="model_revision"):
+            validate_cache_compatibility(config, metadata)
+
+    def test_cache_compatibility_rejects_start_layer_mismatch(self, temp_cache_dir):
+        """Test that compatibility validator rejects cache with different start_layer."""
+        from src.training.data import validate_cache_compatibility
+        from src.data.teacher_cache import CacheMetadata
+
+        metadata = CacheMetadata(
+            model_name="Qwen/Qwen3.5-0.8B",
+            model_revision=None,
+            start_layer=4,
+            end_layer=11,
+            span_depth=8,
+            seq_len=128,
+            store_logits=False,
+            num_samples=100,
+        )
+
+        config = {
+            "model": {"name": "Qwen/Qwen3.5-0.8B"},
+            "replacement_model": {"start_layer": 8, "end_layer": 11},
+            "data": {"seq_len": 128},
+            "loss": {"kl_weight": 0.0},
+        }
+
+        with pytest.raises(ValueError, match="start_layer"):
+            validate_cache_compatibility(config, metadata)
+
+    def test_cache_compatibility_rejects_end_layer_mismatch(self, temp_cache_dir):
+        """Test that compatibility validator rejects cache with different end_layer."""
+        from src.training.data import validate_cache_compatibility
+        from src.data.teacher_cache import CacheMetadata
+
+        metadata = CacheMetadata(
+            model_name="Qwen/Qwen3.5-0.8B",
+            model_revision=None,
+            start_layer=8,
+            end_layer=14,
+            span_depth=7,
+            seq_len=128,
+            store_logits=False,
+            num_samples=100,
+        )
+
+        config = {
+            "model": {"name": "Qwen/Qwen3.5-0.8B"},
+            "replacement_model": {"start_layer": 8, "end_layer": 11},
+            "data": {"seq_len": 128},
+            "loss": {"kl_weight": 0.0},
+        }
+
+        with pytest.raises(ValueError, match="end_layer"):
+            validate_cache_compatibility(config, metadata)
+
+    def test_cache_compatibility_rejects_span_depth_mismatch(self, temp_cache_dir):
+        """Test that compatibility validator rejects cache with different span_depth."""
+        from src.training.data import validate_cache_compatibility
+        from src.data.teacher_cache import CacheMetadata
+
+        metadata = CacheMetadata(
+            model_name="Qwen/Qwen3.5-0.8B",
+            model_revision=None,
+            start_layer=8,
+            end_layer=12,
+            span_depth=5,
+            seq_len=128,
+            store_logits=False,
+            num_samples=100,
+        )
+
+        config = {
+            "model": {"name": "Qwen/Qwen3.5-0.8B"},
+            "replacement_model": {"start_layer": 8, "end_layer": 11},
+            "data": {"seq_len": 128},
+            "loss": {"kl_weight": 0.0},
+        }
+
+        with pytest.raises(ValueError, match="span_depth"):
+            validate_cache_compatibility(config, metadata)
+
+    def test_cache_compatibility_rejects_seq_len_mismatch(self, temp_cache_dir):
+        """Test that compatibility validator rejects cache with different seq_len."""
+        from src.training.data import validate_cache_compatibility
+        from src.data.teacher_cache import CacheMetadata
+
+        metadata = CacheMetadata(
+            model_name="Qwen/Qwen3.5-0.8B",
+            model_revision=None,
+            start_layer=8,
+            end_layer=11,
+            span_depth=4,
+            seq_len=256,
+            store_logits=False,
+            num_samples=100,
+        )
+
+        config = {
+            "model": {"name": "Qwen/Qwen3.5-0.8B"},
+            "replacement_model": {"start_layer": 8, "end_layer": 11},
+            "data": {"seq_len": 128},
+            "loss": {"kl_weight": 0.0},
+        }
+
+        with pytest.raises(ValueError, match="seq_len"):
+            validate_cache_compatibility(config, metadata)
+
+    def test_cache_compatibility_rejects_logits_missing_when_kl_requires_them(
+        self, temp_cache_dir
+    ):
+        """Test that compatibility validator rejects cache without logits when KL weight > 0."""
+        from src.training.data import validate_cache_compatibility
+        from src.data.teacher_cache import CacheMetadata
+
+        metadata = CacheMetadata(
+            model_name="Qwen/Qwen3.5-0.8B",
+            model_revision=None,
+            start_layer=8,
+            end_layer=11,
+            span_depth=4,
+            seq_len=128,
+            store_logits=False,
+            num_samples=100,
+        )
+
+        config = {
+            "model": {"name": "Qwen/Qwen3.5-0.8B"},
+            "replacement_model": {"start_layer": 8, "end_layer": 11},
+            "data": {"seq_len": 128},
+            "loss": {"kl_weight": 0.25},
+        }
+
+        with pytest.raises(ValueError, match="store_logits"):
+            validate_cache_compatibility(config, metadata)
+
+    def test_cache_compatibility_passes_for_compatible_cache(self, temp_cache_dir):
+        """Test that compatibility validator passes for a fully compatible cache."""
+        from src.training.data import validate_cache_compatibility
+        from src.data.teacher_cache import CacheMetadata
+
+        metadata = CacheMetadata(
+            model_name="Qwen/Qwen3.5-0.8B",
+            model_revision=None,
+            start_layer=8,
+            end_layer=11,
+            span_depth=4,
+            seq_len=128,
+            store_logits=True,
+            num_samples=100,
+        )
+
+        config = {
+            "model": {"name": "Qwen/Qwen3.5-0.8B"},
+            "replacement_model": {"start_layer": 8, "end_layer": 11},
+            "data": {"seq_len": 128},
+            "loss": {"kl_weight": 0.25},
+        }
+
+        validate_cache_compatibility(config, metadata)

@@ -9,6 +9,7 @@ This module implements a student model that:
 - Supports variable T values without model rebuild
 """
 
+import logging
 import torch
 import torch.nn as nn
 from typing import Optional, Dict, Any, Union
@@ -17,6 +18,8 @@ from dataclasses import dataclass
 
 from src.model.midblock import IterativeMidblock
 from src.model.ode import MidblockVectorField, build_solver_options
+
+logger = logging.getLogger(__name__)
 
 
 class StudentOutput(dict):
@@ -533,3 +536,91 @@ class FrozenQwenStudent(nn.Module):
             self.midblock.load_state_dict(state_dict)
         else:
             raise ValueError("No midblock to load into (bypass mode)")
+
+    def extract_teacher_targets(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Extract teacher targets from frozen Qwen using one forward pass.
+
+        This method reuses the frozen Qwen weights already inside the student model
+        to produce teacher targets for online-no-cache training. Uses a single
+        forward pass with output_hidden_states=True.
+
+        Args:
+            input_ids: Input token IDs [batch_size, seq_len]
+            attention_mask: Attention mask [batch_size, seq_len]
+
+        Returns:
+            Dictionary containing:
+                - h_start: Hidden state at start_layer (input to layer start_layer)
+                - h_target: Hidden state after end_layer (output of layer end_layer)
+                - velocity_target: h_target - h_start (flow matching velocity)
+                - teacher_logits: Final logits from the full teacher model
+        """
+        with torch.no_grad():
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+
+            hidden_states = outputs.hidden_states
+
+            h_start = hidden_states[self.start_layer]
+            h_target = hidden_states[self.end_layer + 1]
+            velocity_target = h_target - h_start
+            teacher_logits = outputs.logits
+
+        return {
+            "h_start": h_start,
+            "h_target": h_target,
+            "velocity_target": velocity_target,
+            "teacher_logits": teacher_logits,
+        }
+
+    def gradient_checkpointing_enable(self, gradient_checkpointing_func=None):
+        """Enable gradient checkpointing to reduce memory usage.
+
+        This enables gradient checkpointing on the base Qwen model layers
+        and the midblock to trade compute for memory during training.
+
+        Args:
+            gradient_checkpointing_func: Optional custom checkpointing function.
+                If None, uses torch.utils.checkpoint.checkpoint.
+        """
+        if gradient_checkpointing_func is None:
+            from torch.utils.checkpoint import checkpoint
+
+            gradient_checkpointing_func = checkpoint
+
+        # Enable gradient checkpointing on the base model
+        base_model = self._get_base_model()
+
+        # Enable HF-style gradient checkpointing if available
+        if hasattr(base_model, "gradient_checkpointing_enable"):
+            base_model.gradient_checkpointing_enable()
+            logger.info("Enabled HF gradient checkpointing on base model")
+        elif hasattr(self.model, "gradient_checkpointing_enable"):
+            self.model.gradient_checkpointing_enable()
+            logger.info("Enabled HF gradient checkpointing on full model")
+
+        # Store checkpointing function for manual use in forward
+        self._gradient_checkpointing_func = gradient_checkpointing_func
+        self._gradient_checkpointing_enabled = True
+
+    def gradient_checkpointing_disable(self):
+        """Disable gradient checkpointing."""
+        base_model = self._get_base_model()
+
+        if hasattr(base_model, "gradient_checkpointing_disable"):
+            base_model.gradient_checkpointing_disable()
+        elif hasattr(self.model, "gradient_checkpointing_disable"):
+            self.model.gradient_checkpointing_disable()
+
+        self._gradient_checkpointing_enabled = False
+        if hasattr(self, "_gradient_checkpointing_func"):
+            delattr(self, "_gradient_checkpointing_func")

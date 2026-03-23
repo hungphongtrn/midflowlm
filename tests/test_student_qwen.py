@@ -499,3 +499,207 @@ class TestParameterCounts:
 
         trainable = student.get_trainable_parameter_count()
         assert trainable == 0, "Bypass mode should have zero trainable parameters"
+
+
+class TestExtractTeacherTargets:
+    """Test the extract_teacher_targets method for online-no-cache training."""
+
+    def test_extract_teacher_targets_exists(self, model_config, device):
+        """Test that extract_teacher_targets method exists."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        assert hasattr(student, "extract_teacher_targets")
+        assert callable(student.extract_teacher_targets)
+
+    def test_extract_teacher_targets_returns_correct_keys(
+        self, model_config, device, sample_input
+    ):
+        """Test that extract_teacher_targets returns all required keys."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        result = student.extract_teacher_targets(input_ids, attention_mask)
+
+        assert "h_start" in result
+        assert "h_target" in result
+        assert "velocity_target" in result
+        assert "teacher_logits" in result
+
+    def test_extract_teacher_targets_single_forward_pass(
+        self, model_config, device, sample_input
+    ):
+        """Test that extract_teacher_targets uses a single forward pass."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        result = student.extract_teacher_targets(input_ids, attention_mask)
+
+        batch_size, seq_len = input_ids.shape
+        hidden_size = result["h_start"].shape[-1]
+
+        assert result["h_start"].shape == (batch_size, seq_len, hidden_size)
+        assert result["h_target"].shape == (batch_size, seq_len, hidden_size)
+        assert result["velocity_target"].shape == (batch_size, seq_len, hidden_size)
+        assert result["teacher_logits"].shape[0] == batch_size
+        assert result["teacher_logits"].shape[1] == seq_len
+
+    def test_extract_teacher_targets_velocity_is_difference(
+        self, model_config, device, sample_input
+    ):
+        """Test that velocity_target = h_target - h_start."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        result = student.extract_teacher_targets(input_ids, attention_mask)
+
+        expected_velocity = result["h_target"] - result["h_start"]
+        assert torch.allclose(result["velocity_target"], expected_velocity, atol=1e-6)
+
+    def test_extract_teacher_targets_no_grad(self, model_config, device, sample_input):
+        """Test that extract_teacher_targets runs under no_grad."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        result = student.extract_teacher_targets(input_ids, attention_mask)
+
+        for key, tensor in result.items():
+            assert not tensor.requires_grad, f"{key} should not require grad"
+
+    def test_extract_teacher_targets_parity_with_qwen_inspector(
+        self, model_config, device, sample_input
+    ):
+        """Test that extract_teacher_targets matches QwenInspector outputs."""
+        from src.model.student_qwen import FrozenQwenStudent
+        from src.model.qwen_parity import QwenInspector
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        teacher_result = student.extract_teacher_targets(input_ids, attention_mask)
+
+        inspector = QwenInspector(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            device=device,
+        )
+
+        h_start_inspector = inspector.extract_h_start(input_ids, attention_mask)
+        h_target_inspector = inspector.extract_h_target(input_ids, attention_mask)
+        logits_inspector = inspector.extract_final_logits(input_ids, attention_mask)
+
+        assert torch.allclose(teacher_result["h_start"], h_start_inspector, atol=1e-5)
+        assert torch.allclose(teacher_result["h_target"], h_target_inspector, atol=1e-5)
+        assert torch.allclose(
+            teacher_result["teacher_logits"], logits_inspector, atol=1e-5
+        )
+
+    def test_extract_teacher_targets_bypass_mode(
+        self, model_config, device, sample_input
+    ):
+        """Test extract_teacher_targets in bypass mode still works."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+            bypass_mode=True,
+        )
+
+        result = student.extract_teacher_targets(input_ids, attention_mask)
+
+        assert "h_start" in result
+        assert "h_target" in result
+        assert "velocity_target" in result
+        assert "teacher_logits" in result
+
+        expected_velocity = result["h_target"] - result["h_start"]
+        assert torch.allclose(result["velocity_target"], expected_velocity, atol=1e-6)
+
+    def test_extract_teacher_targets_reuses_student_qwen_weights(
+        self, model_config, device, sample_input
+    ):
+        """Test that extract_teacher_targets uses the same model as the student."""
+        from src.model.student_qwen import FrozenQwenStudent
+
+        input_ids, attention_mask = sample_input
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        teacher_result = student.extract_teacher_targets(input_ids, attention_mask)
+
+        student_bypass = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+            bypass_mode=True,
+        )
+        student_logits_bypass = student_bypass(input_ids, attention_mask)
+
+        assert torch.allclose(
+            teacher_result["teacher_logits"], student_logits_bypass, atol=1e-5
+        )

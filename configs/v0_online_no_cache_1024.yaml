@@ -1,12 +1,13 @@
-experiment_name: "v0_qwen_iterative_midblock_smoke"
+experiment_name: "v0_online_no_cache_1024_kl"
+
 seed: 1337
 
 model:
   name: "Qwen/Qwen3.5-0.8B"
   revision: null
   max_steps_T: 8
-  train_T_values: [1, 2, 4]
-  train_T_weights: [0.4, 0.4, 0.2]
+  train_T_values: [4]
+  train_T_weights: [1.0]
   step_embedding: "discrete"
   reuse_qwen_modules: true
 
@@ -24,32 +25,14 @@ replacement_model:
   use_step_conditioning: true
   conditioning_mode: "timestep_plus_layer_boundary"
   init_strategy: "fresh"
-  trajectory_alignment:
-    T_less_than_depth:
-      policy: "compression"
-      method: "uniform_sampling"
-    T_equals_depth:
-      policy: "exact"
-      method: "one_to_one_mapping"
-    T_greater_than_depth:
-      policy: "expansion"
-      method: "linear_interpolation"
-
-teacher_cache:
-  enabled: true
-  cache_dir: "./cache/tinystories_qwen_boundary_states_smoke"
-  store_logits: false
-  store_hidden_states: true
-  overwrite: true
 
 data:
   dataset_name: "roneneldan/TinyStories"
   dataset_revision: null
   text_field: "text"
-  seq_len: 128
-  train_samples: 8
-  val_samples: 2
-  test_samples: 2
+  seq_len: 1024
+  train_samples: 1000
+  val_samples: 100
   batch_size: 1
   num_workers: 0
   pin_memory: false
@@ -75,21 +58,21 @@ optimizer:
 
 scheduler:
   name: "cosine_with_warmup"
-  warmup_steps: 10
+  warmup_steps: 50
 
 train_loop:
-  precision: "fp32"
-  max_epochs: 1
+  precision: "bf16-mixed"
+  max_epochs: 3
   accumulate_grad_batches: 1
   sample_continuous_time: true
-  log_every_n_steps: 1
-  val_check_interval: 1
+  log_every_n_steps: 10
+  val_check_interval: 100
   gradient_checkpointing: false
-  checkpoint_dir: "./outputs/v0_qwen_iterative_midblock_smoke/checkpoints"
+  checkpoint_dir: "./outputs/v0_online_no_cache_1024_kl/checkpoints"
   resume_from_checkpoint: null
 
 logging:
-  log_dir: "./outputs/v0_qwen_iterative_midblock_smoke/logs"
+  log_dir: "./outputs/v0_online_no_cache_1024_kl/logs"
   save_top_k: 1
   monitor: "val/total_loss"
   mode: "min"

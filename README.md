@@ -1,6 +1,55 @@
 # MidflowLM
 
-MidflowLM is an experimental project for iterative latent matching / distillation on top of Qwen hidden states.
+**Iterative Latent Matching via Flow-Based Refinement**
+
+MidflowLM is an experimental project that replaces a span of transformer layers with a trainable iterative midblock that learns to match teacher hidden states through flow-based refinement.
+
+## Training Idea
+
+The core training paradigm is **iterative latent matching**: instead of learning a single forward pass through N layers, the student learns an iterative refinement process that can run for variable steps T while matching the teacher's trajectory through the same layer span.
+
+### Architecture
+
+```
+Input Text
+    ↓
+[Embeddings] (frozen)
+    ↓
+[Lower Qwen Layers 0-7] (frozen)
+    ↓
+[IterativeMidblock 8-11] (trainable) ← Multiple refinement steps T
+    ↓
+[Upper Qwen Layers 12+] (frozen)
+    ↓
+[LM Head] (frozen)
+    ↓
+Output Logits
+```
+
+### Key Components
+
+1. **Frozen Qwen Base**: The teacher and student share the same Qwen architecture, with only layers 8-11 being replaced.
+
+2. **IterativeMidblock**: A trainable flow-based module that:
+   - Takes hidden states at layer 8 boundary
+   - Iteratively refines them through T steps (configurable at inference)
+   - Outputs hidden states at layer 11 boundary
+   - Uses ODE solvers (Euler) for the iterative process
+
+3. **Teacher Cache**: Pre-computed teacher hidden states and trajectory targets, enabling efficient distillation without loading the teacher during training.
+
+### Loss Functions
+
+- **Velocity Loss**: Matches the derivative/velocity of hidden state changes
+- **Endpoint Loss**: Matches final hidden states at span exit
+- **Trajectory Loss**: Matches intermediate teacher hidden states
+- **KL Divergence**: Matches output token distributions (optional)
+
+### Why Iterative?
+
+- **Compute-Efficiency Tradeoff**: More steps = better quality, fewer steps = faster inference
+- **Variable T at Inference**: Same model can run at different speed/quality points
+- **Flow Matching**: Continuous-time formulation enables flexible step counts
 
 ## What is the cache build?
 
