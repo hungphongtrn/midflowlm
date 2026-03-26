@@ -429,65 +429,64 @@ class FrozenQwenStudent(nn.Module):
         """
         base_model = self._get_base_model()
 
-        with torch.no_grad():
-            # Get the layers module
-            if hasattr(base_model, "layers"):
-                layers = base_model.layers
-            else:
-                raise AttributeError("Cannot find layers module in base model")
+        # Get the layers module
+        if hasattr(base_model, "layers"):
+            layers = base_model.layers
+        else:
+            raise AttributeError("Cannot find layers module in base model")
 
-            # Compute position embeddings if needed (Qwen3.5)
-            position_embeddings = None
-            if hasattr(base_model, "rotary_emb"):
-                batch_size, seq_len, _ = hidden_states.shape
-                position_ids = (
-                    torch.arange(seq_len, device=hidden_states.device)
-                    .unsqueeze(0)
-                    .expand(batch_size, -1)
-                )
-                position_embeddings = base_model.rotary_emb(hidden_states, position_ids)
+        # Compute position embeddings if needed (Qwen3.5)
+        position_embeddings = None
+        if hasattr(base_model, "rotary_emb"):
+            batch_size, seq_len, _ = hidden_states.shape
+            position_ids = (
+                torch.arange(seq_len, device=hidden_states.device)
+                .unsqueeze(0)
+                .expand(batch_size, -1)
+            )
+            position_embeddings = base_model.rotary_emb(hidden_states, position_ids)
 
-            # Manually run through layers end_layer+1 to num_layers-1
-            h = hidden_states
-            for layer_idx in range(self.end_layer + 1, self.num_layers):
-                layer = layers[layer_idx]
+        # Manually run through layers end_layer+1 to num_layers-1
+        h = hidden_states
+        for layer_idx in range(self.end_layer + 1, self.num_layers):
+            layer = layers[layer_idx]
 
-                # Build layer kwargs based on signature
-                import inspect
+            # Build layer kwargs based on signature
+            import inspect
 
-                sig = inspect.signature(layer.forward)
-                layer_kwargs = {"hidden_states": h}
+            sig = inspect.signature(layer.forward)
+            layer_kwargs = {"hidden_states": h}
 
-                # Note: We don't pass attention_mask because:
-                # 1. The model uses causal masking by default
-                # 2. The attention_mask format [batch, seq] doesn't work with
-                #    the layer's expected format and causes shape mismatches
-                # 3. For training, causal masking is typically what we want
+            # Note: We don't pass attention_mask because:
+            # 1. The model uses causal masking by default
+            # 2. The attention_mask format [batch, seq] doesn't work with
+            #    the layer's expected format and causes shape mismatches
+            # 3. For training, causal masking is typically what we want
 
-                if (
-                    "position_embeddings" in sig.parameters
-                    and position_embeddings is not None
-                ):
-                    layer_kwargs["position_embeddings"] = position_embeddings
+            if (
+                "position_embeddings" in sig.parameters
+                and position_embeddings is not None
+            ):
+                layer_kwargs["position_embeddings"] = position_embeddings
 
-                # Use layer.forward directly to avoid shape issues with __call__
-                layer_output = layer.forward(**layer_kwargs)
+            # Use layer.forward directly to avoid shape issues with __call__
+            layer_output = layer.forward(**layer_kwargs)
 
-                # Layer returns a tuple: (hidden_states, ...) or just hidden_states
-                h = layer_output[0] if isinstance(layer_output, tuple) else layer_output
+            # Layer returns a tuple: (hidden_states, ...) or just hidden_states
+            h = layer_output[0] if isinstance(layer_output, tuple) else layer_output
 
-            # Apply final norm if it exists
-            if hasattr(base_model, "norm"):
-                h = base_model.norm(h)
+        # Apply final norm if it exists
+        if hasattr(base_model, "norm"):
+            h = base_model.norm(h)
 
-            # Apply LM head
-            if hasattr(self.model, "lm_head"):
-                logits = self.model.lm_head(h)
-            elif hasattr(base_model, "lm_head"):
-                logits = base_model.lm_head(h)
-            else:
-                # Last resort: try to get lm_head from the model
-                logits = self.model.lm_head(h)
+        # Apply LM head
+        if hasattr(self.model, "lm_head"):
+            logits = self.model.lm_head(h)
+        elif hasattr(base_model, "lm_head"):
+            logits = base_model.lm_head(h)
+        else:
+            # Last resort: try to get lm_head from the model
+            logits = self.model.lm_head(h)
 
         return logits
 

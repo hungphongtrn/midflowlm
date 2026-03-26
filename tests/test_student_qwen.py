@@ -703,3 +703,178 @@ class TestExtractTeacherTargets:
         assert torch.allclose(
             teacher_result["teacher_logits"], student_logits_bypass, atol=1e-5
         )
+
+
+class TestGradientFlow:
+    """Test that CE/KL gradients flow through frozen Qwen to midblock."""
+
+    def test_ce_loss_gradients_reach_midblock(self, model_config, device):
+        """Test that CE loss gradients flow to midblock parameters."""
+        from src.model.student_qwen import FrozenQwenStudent
+        import torch.nn.functional as F
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        # Create input
+        batch_size, seq_len = 2, 16
+        input_ids = torch.randint(0, 1000, (batch_size, seq_len), device=device)
+        attention_mask = torch.ones(batch_size, seq_len, device=device)
+
+        # Forward pass
+        logits = student(input_ids, attention_mask, num_steps=4)
+
+        # Create CE loss target
+        labels = input_ids[:, 1:]
+        pred_logits = logits[:, :-1, :]
+
+        # Compute CE loss
+        ce_loss = F.cross_entropy(
+            pred_logits.reshape(-1, pred_logits.size(-1)), labels.reshape(-1)
+        )
+
+        # Backward
+        ce_loss.backward()
+
+        # Verify midblock has gradients
+        midblock_has_grad = False
+        for name, param in student.named_parameters():
+            if "midblock" in name and param.grad is not None:
+                if param.grad.abs().sum() > 0:
+                    midblock_has_grad = True
+                    break
+
+        assert midblock_has_grad, (
+            "Midblock should have non-zero gradients after CE loss backward"
+        )
+
+    def test_frozen_qwen_has_no_gradients(self, model_config, device):
+        """Test that frozen Qwen parameters have no gradients after backward."""
+        from src.model.student_qwen import FrozenQwenStudent
+        import torch.nn.functional as F
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        batch_size, seq_len = 2, 16
+        input_ids = torch.randint(0, 1000, (batch_size, seq_len), device=device)
+        attention_mask = torch.ones(batch_size, seq_len, device=device)
+
+        logits = student(input_ids, attention_mask, num_steps=4)
+        labels = input_ids[:, 1:]
+        pred_logits = logits[:, :-1, :]
+
+        ce_loss = F.cross_entropy(
+            pred_logits.reshape(-1, pred_logits.size(-1)), labels.reshape(-1)
+        )
+        ce_loss.backward()
+
+        # Verify frozen Qwen parameters have no gradients
+        for name, param in student.named_parameters():
+            if "model." in name and "midblock" not in name:
+                assert param.grad is None or param.grad.abs().sum() == 0, (
+                    f"Frozen Qwen parameter should have no gradient: {name}"
+                )
+
+    def test_kl_loss_gradients_reach_midblock(self, model_config, device):
+        """Test that KL divergence gradients flow to midblock parameters."""
+        from src.model.student_qwen import FrozenQwenStudent
+        import torch.nn.functional as F
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        batch_size, seq_len = 2, 16
+        input_ids = torch.randint(0, 1000, (batch_size, seq_len), device=device)
+        attention_mask = torch.ones(batch_size, seq_len, device=device)
+
+        # Get teacher logits (no_grad)
+        teacher_targets = student.extract_teacher_targets(input_ids, attention_mask)
+        teacher_logits = teacher_targets["teacher_logits"]
+
+        # Forward pass (with_grad, since we removed no_grad)
+        student_logits = student(input_ids, attention_mask, num_steps=4)
+
+        # KL divergence loss
+        kl_loss = F.kl_div(
+            F.log_softmax(student_logits, dim=-1),
+            F.softmax(teacher_logits, dim=-1),
+            reduction="batchmean",
+        )
+
+        kl_loss.backward()
+
+        # Verify midblock has gradients
+        midblock_has_grad = False
+        for name, param in student.named_parameters():
+            if "midblock" in name and param.grad is not None:
+                if param.grad.abs().sum() > 0:
+                    midblock_has_grad = True
+                    break
+
+        assert midblock_has_grad, (
+            "Midblock should have non-zero gradients after KL loss backward"
+        )
+
+    def test_optimizer_step_updates_only_midblock(self, model_config, device):
+        """Test that optimizer step only changes midblock parameters."""
+        from src.model.student_qwen import FrozenQwenStudent
+        import torch.nn.functional as F
+
+        student = FrozenQwenStudent(
+            model_name=model_config["model_name"],
+            start_layer=model_config["start_layer"],
+            end_layer=model_config["end_layer"],
+            max_steps_T=model_config["max_steps_T"],
+            device=device,
+        )
+
+        # Store initial parameter values
+        midblock_params_before = {}
+        qwen_params_before = {}
+        for name, param in student.named_parameters():
+            if "midblock" in name:
+                midblock_params_before[name] = param.data.clone()
+            elif "model." in name:
+                qwen_params_before[name] = param.data.clone()
+
+        # Forward + backward + optimizer step
+        batch_size, seq_len = 2, 16
+        input_ids = torch.randint(0, 1000, (batch_size, seq_len), device=device)
+        attention_mask = torch.ones(batch_size, seq_len, device=device)
+
+        logits = student(input_ids, attention_mask, num_steps=4)
+        labels = input_ids[:, 1:]
+        pred_logits = logits[:, :-1, :]
+
+        ce_loss = F.cross_entropy(
+            pred_logits.reshape(-1, pred_logits.size(-1)), labels.reshape(-1)
+        )
+
+        optimizer = torch.optim.Adam(student.parameters(), lr=1e-4)
+        optimizer.zero_grad()
+        ce_loss.backward()
+        optimizer.step()
+
+        # Verify Qwen parameters unchanged
+        for name, param in student.named_parameters():
+            if "model." in name and "midblock" not in name:
+                if name in qwen_params_before:
+                    assert torch.allclose(
+                        param.data, qwen_params_before[name], atol=1e-7
+                    ), f"Frozen Qwen parameter changed after optimizer step: {name}"
