@@ -540,6 +540,9 @@ class FrozenQwenStudent(nn.Module):
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
+        need_teacher_logits: bool = True,
+        need_velocity: bool = True,
+        need_trajectory_anchors: bool = False,
     ) -> Dict[str, torch.Tensor]:
         """
         Extract teacher targets from frozen Qwen using one forward pass.
@@ -551,35 +554,65 @@ class FrozenQwenStudent(nn.Module):
         Args:
             input_ids: Input token IDs [batch_size, seq_len]
             attention_mask: Attention mask [batch_size, seq_len]
+            need_teacher_logits: If False, skip computing teacher logits (saves memory when KL loss disabled)
+            need_velocity: If False, skip computing velocity_target (saves compute when velocity loss disabled)
+            need_trajectory_anchors: If True, extract h8,h9,h10,h11 for v0.1 trajectory loss
 
         Returns:
-            Dictionary containing:
+            Dictionary containing (depending on flags):
                 - h_start: Hidden state at start_layer (input to layer start_layer)
                 - h_target: Hidden state after end_layer (output of layer end_layer)
-                - velocity_target: h_target - h_start (flow matching velocity)
-                - teacher_logits: Final logits from the full teacher model
+                - velocity_target: h_target - h_start (flow matching velocity, if need_velocity=True)
+                - teacher_logits: Final logits from the full teacher model (if need_teacher_logits=True)
+                - trajectory_anchors: Dict with h8,h9,h10,h11 (if need_trajectory_anchors=True)
         """
         with torch.no_grad():
-            outputs = self.model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-                return_dict=True,
-            )
+            # Build forward kwargs based on what we need
+            forward_kwargs = {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "output_hidden_states": True,
+                "return_dict": True,
+            }
+
+            # Only compute logits if needed (saves memory)
+            if not need_teacher_logits:
+                forward_kwargs["output_logits"] = False
+
+            outputs = self.model(**forward_kwargs)
 
             hidden_states = outputs.hidden_states
 
             h_start = hidden_states[self.start_layer]
             h_target = hidden_states[self.end_layer + 1]
-            velocity_target = h_target - h_start
-            teacher_logits = outputs.logits
 
-        return {
-            "h_start": h_start,
-            "h_target": h_target,
-            "velocity_target": velocity_target,
-            "teacher_logits": teacher_logits,
-        }
+            result = {
+                "h_start": h_start,
+                "h_target": h_target,
+            }
+
+            # Compute velocity only if needed
+            if need_velocity:
+                velocity_target = h_target - h_start
+                result["velocity_target"] = velocity_target
+
+            # Add teacher logits only if needed
+            if need_teacher_logits:
+                result["teacher_logits"] = outputs.logits
+
+            # Extract trajectory anchors if needed (for v0.1 trajectory loss)
+            if need_trajectory_anchors:
+                # Extract h8, h9, h10, h11 from hidden_states[8:12]
+                # hidden_states[0] is embeddings, hidden_states[i] is output of layer i-1
+                # So h8 = hidden_states[8], h11 = hidden_states[11]
+                result["trajectory_anchors"] = {
+                    "h8": hidden_states[8],
+                    "h9": hidden_states[9],
+                    "h10": hidden_states[10],
+                    "h11": hidden_states[11],
+                }
+
+        return result
 
     def gradient_checkpointing_enable(self, gradient_checkpointing_func=None):
         """Enable gradient checkpointing to reduce memory usage.
