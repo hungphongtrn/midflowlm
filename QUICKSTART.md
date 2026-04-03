@@ -2,7 +2,21 @@
 
 Run the full experiment matrix on a Vast 3×3090 machine with minimal setup.
 
-## 1. Clone and Setup (One-time)
+## Local Testing (3060)
+
+Before deploying to Vast, test on your local 3060:
+
+```bash
+# Quick 5-10 minute smoke test
+bash scripts/test_3060.sh
+
+# Run one adapted config
+python3 scripts/train.py --config configs/v0_1_matrix_3060/midflow_qwen_8to11_p1_a1_proj_mixb_endkl.yaml
+```
+
+The 3060 configs use `batch_size=1, grad_accum=16` to fit in 12GB VRAM.
+
+**Deploy to Vast**
 
 ```bash
 # Clone repo
