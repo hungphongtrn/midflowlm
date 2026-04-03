@@ -296,6 +296,25 @@ class Trainer:
         if step % 100 == 0:
             self.tensorboard_writer.flush()
 
+    def _get_loss_flags(self) -> Dict[str, bool]:
+        """Determine which teacher targets are needed based on loss weights.
+
+        Returns:
+            Dictionary with flags:
+                - need_teacher_logits: True if KL loss is enabled (kl_weight > 0)
+                - need_velocity: True if velocity loss is enabled (velocity_weight > 0)
+                - need_trajectory_anchors: True if trajectory loss is enabled (trajectory_weight > 0)
+        """
+        kl_weight = float(self.loss_config.get("kl_weight", 0.0))
+        velocity_weight = float(self.loss_config.get("velocity_weight", 0.0))
+        trajectory_weight = float(self.loss_config.get("trajectory_weight", 0.0))
+
+        return {
+            "need_teacher_logits": kl_weight > 0,
+            "need_velocity": velocity_weight > 0,
+            "need_trajectory_anchors": trajectory_weight > 0,
+        }
+
     def train_step(
         self, batch: Dict[str, torch.Tensor], T: Optional[int] = None
     ) -> Dict[str, float]:
@@ -318,15 +337,17 @@ class Trainer:
             attention_mask = attention_mask.to(self.device)
 
         logger.debug(f"Extracting teacher targets for batch...")
+        loss_flags = self._get_loss_flags()
         teacher_targets = self.model.extract_teacher_targets(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            **loss_flags,
         )
         logger.debug(f"Teacher targets extracted successfully")
         h_start = teacher_targets["h_start"]
         h_target = teacher_targets["h_target"]
-        velocity_target = teacher_targets["velocity_target"]
-        teacher_logits = teacher_targets["teacher_logits"]
+        velocity_target = teacher_targets.get("velocity_target")
+        teacher_logits = teacher_targets.get("teacher_logits")
 
         # For CE loss, pass input_ids directly. The loss function will extract
         # targets as input_ids[:, 1:] and use logits[:, :-1] for predictions.
@@ -478,14 +499,16 @@ class Trainer:
         if attention_mask is not None:
             attention_mask = attention_mask.to(self.device)
 
+        loss_flags = self._get_loss_flags()
         teacher_targets = self.model.extract_teacher_targets(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            **loss_flags,
         )
         h_start = teacher_targets["h_start"]
         h_target = teacher_targets["h_target"]
-        velocity_target = teacher_targets["velocity_target"]
-        teacher_logits = teacher_targets["teacher_logits"]
+        velocity_target = teacher_targets.get("velocity_target")
+        teacher_logits = teacher_targets.get("teacher_logits")
 
         # For CE loss, pass input_ids directly. The loss function will extract
         # targets as input_ids[:, 1:] and use logits[:, :-1] for predictions.
