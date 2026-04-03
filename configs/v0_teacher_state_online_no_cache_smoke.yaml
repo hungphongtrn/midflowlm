@@ -1,22 +1,22 @@
-experiment_name: "v0_qwen_mixed_corpus_midblock_plus_kl_loss"
-
-teacher_cache:
-  enabled: true
-  cache_dir: "./cache/mixed_qwen_boundary_states"
-  store_logits: false
-  store_hidden_states: true
-  overwrite: false
+experiment_name: "v0_teacher_state_online_no_cache_smoke"
 
 teacher_state:
-  mode: offline_cache
+  mode: online_no_cache
+
+teacher_cache:
+  enabled: false
+  cache_dir: "./cache/mixed_qwen_boundary_states"
+  store_logits: false
+  store_hidden_states: false
+  overwrite: false
 
 data:
   loader: "mixture"
   seq_len: 128
-  batch_size: 10
-  num_workers: 4
-  pin_memory: true
-  persistent_workers: true
+  batch_size: 2
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
   shuffle_seed: 1337
   mixture_components:
     - name: "fineweb_edu"
@@ -26,61 +26,8 @@ data:
       val_split: "train"
       format_type: "plain_text"
       text_field: "text"
-      train_samples: 12000
-      val_samples: 600
-    - name: "ultrachat_sft"
-      dataset_name: "HuggingFaceH4/ultrachat_200k"
-      dataset_config: "default"
-      train_split: "train_sft"
-      val_split: "test_sft"
-      format_type: "chat_messages"
-      messages_field: "messages"
-      train_samples: 5000
-      val_samples: 250
-    - name: "arc_challenge"
-      dataset_name: "allenai/ai2_arc"
-      dataset_config: "ARC-Challenge"
-      train_split: "train"
-      val_split: "validation"
-      format_type: "mcq_choices"
-      question_field: "question"
-      choices_field: "choices"
-      answer_field: "answerKey"
-      train_samples: 900
-      val_samples: 120
-    - name: "arc_easy"
-      dataset_name: "allenai/ai2_arc"
-      dataset_config: "ARC-Easy"
-      train_split: "train"
-      val_split: "validation"
-      format_type: "mcq_choices"
-      question_field: "question"
-      choices_field: "choices"
-      answer_field: "answerKey"
-      train_samples: 1200
-      val_samples: 150
-    - name: "commonsense_qa"
-      dataset_name: "tau/commonsense_qa"
-      dataset_config: "default"
-      train_split: "train"
-      val_split: "validation"
-      format_type: "mcq_choices"
-      question_field: "question"
-      choices_field: "choices"
-      answer_field: "answerKey"
-      train_samples: 1500
-      val_samples: 150
-    - name: "openbookqa"
-      dataset_name: "allenai/openbookqa"
-      dataset_config: "main"
-      train_split: "train"
-      val_split: "validation"
-      format_type: "mcq_choices"
-      question_field: "question_stem"
-      choices_field: "choices"
-      answer_field: "answerKey"
-      train_samples: 900
-      val_samples: 100
+      train_samples: 100
+      val_samples: 20
 
 loss:
   velocity_weight: 1.0
@@ -143,21 +90,21 @@ optimizer:
 
 scheduler:
   name: "cosine_with_warmup"
-  warmup_steps: 100
+  warmup_steps: 10
 
 train_loop:
   precision: "bf16-mixed"
-  max_epochs: 3
-  accumulate_grad_batches: 4
+  max_epochs: 1
+  accumulate_grad_batches: 1
   log_every_n_steps: 10
-  val_check_interval: 250
+  val_check_interval: 50
   gradient_checkpointing: false
   sample_continuous_time: true
-  checkpoint_dir: "./outputs/v0_qwen_mixed_corpus_midblock_plus_kl_loss/checkpoints"
+  checkpoint_dir: "./outputs/v0_teacher_state_online_no_cache_smoke/checkpoints"
   resume_from_checkpoint: null
 
 logging:
-  log_dir: "./outputs/v0_qwen_mixed_corpus_midblock_plus_kl_loss/logs"
+  log_dir: "./outputs/v0_teacher_state_online_no_cache_smoke/logs"
   save_top_k: 2
   monitor: "val/total_loss"
   mode: "min"

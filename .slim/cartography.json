@@ -1,0 +1,68 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "last_run": "2026-04-03T13:43:44.376310Z",
+    "root": "/home/hungphongtrn/Workspace/midflowlm",
+    "include_patterns": [
+      "src/**/*.py",
+      "configs/**/*.yaml"
+    ],
+    "exclude_patterns": [
+      "tests/**",
+      "docs/**",
+      ".venv/**",
+      "**/__pycache__/**"
+    ],
+    "exceptions": []
+  },
+  "file_hashes": {
+    "configs/v0_mixed_corpus.yaml": "5311192c176acd3961b9546a91d2c934",
+    "configs/v0_mixed_corpus_plus_kl_loss.yaml": "22e6c83a07245ef696bebbc075574c6c",
+    "configs/v0_onemotif.yaml": "fa069f639bc41a8bb4c650252ea2ac99",
+    "configs/v0_online_no_cache_1024.yaml": "c27cb07bd690c07549b8f62f5aab952a",
+    "configs/v0_online_no_cache_mixed_ce_kl.yaml": "d3115b8f36ec8555ef6360203cc1d369",
+    "configs/v0_smoke_run.yaml": "8f1abee3a8911ec4f762dc6f1d9ceaac",
+    "configs/v0_warmstart_ce_kl.yaml": "698fae92733f49e824de0ae3f9e6f247",
+    "configs/v0_warmstart_ce_only.yaml": "ab6ef0badcc803b6f02c87d74be0e9c9",
+    "configs/v0_warmstart_kl_only.yaml": "270f7902c16aa1a310c556d17125b813",
+    "external/minFM/configs/flux_inference.yaml": "14c2b3389a706561ad81e25a2bd064fe",
+    "external/minFM/configs/flux_tiny_imagenet.yaml": "1f381a1ba88c6e1716a29e58cc3a7678",
+    "src/__init__.py": "8eef64595c6faec54e3aa140fd4308d3",
+    "src/data/dataset_factory.py": "fcfaa64a2dd880ef7df7b2c416f46ea0",
+    "src/data/mixed_corpus.py": "9ecea34d09fabab5c653414a050d56ba",
+    "src/data/teacher_cache.py": "2a3ee6412020ae3ba12055a633c6a2eb",
+    "src/data/tinystories.py": "df35bf6ec4e1f6b44373f9b37a808a6f",
+    "src/eval/__init__.py": "870b791ba987035be5b8cdaaebe4c4bb",
+    "src/eval/baselines.py": "378a33f1104e1e7a651af7b2433cd912",
+    "src/eval/mmlu_pro_behavior.py": "473b6683f8e02983156f7b96eed562dc",
+    "src/eval/text_checkpoint_sweep.py": "1764deef297746ef8bd0757a248bef2f",
+    "src/model/__init__.py": "be0a4b2a922983aa13152084f07b6391",
+    "src/model/adapter.py": "8d3dadf68052b971924ca649ba64f518",
+    "src/model/flow_block.py": "d808b9d3fc3a4b567fbdc7a0b9b8fee9",
+    "src/model/midblock.py": "c2446e144ee4901d0f854dc0967b8ec1",
+    "src/model/ode.py": "4492fb3388bc70ab9f03ac516ef8b139",
+    "src/model/qwen_parity.py": "339c847e6bc610b2b8f5fbf5d6c50e05",
+    "src/model/student_qwen.py": "8e9e7b498ef70a3f32235777bb90ebb8",
+    "src/scripts/inspect_trainer_logs.py": "a25c0ac4309e2c6a27f396b83099bf4c",
+    "src/scripts/run_decoding_sweep.py": "a1dd0d1dcf19a42af2b89b650b10c6d7",
+    "src/scripts/test_repetition_fix.py": "c16932301a9e54bb5691dc9d3fd40a93",
+    "src/training/alignment.py": "86e142d93cf7f8cfb68e8f07d60ce81b",
+    "src/training/data.py": "088cf33265e8fe16939fce4e641f6888",
+    "src/training/losses.py": "9e47820241a0f4fa68887909190f0b46",
+    "src/training/online_no_cache_trainer.py": "cc49fb0b6ceceb7cdc1e69383f04686a",
+    "src/training/trainer.py": "baa0db8f9a580e9be3ec830b85b88b2d"
+  },
+  "folder_hashes": {
+    "external/minFM/configs": "dc2fdf7e45f226db5ca5da050c2af14c",
+    "src/eval": "20d709793e456b9ed89c3cd5e7fbd6b0",
+    "configs": "0eaeed557f4263138ba6f5804b0027d7",
+    "external/minFM": "dc2fdf7e45f226db5ca5da050c2af14c",
+    "src/data": "74fd1aa18322388f69c616fe464c9add",
+    "src/model": "11412107b3af5526bac47cfe96d87a9d",
+    ".": "",
+    "src": "aba5b2135ccdb7bff3d5886f523e116a",
+    "src/scripts": "a9d0c87cd9dd77c736f8d7c9f858e2ce",
+    "src/training": "bea1e3d61da68650591cbcc5bb62932a",
+    "external": "dc2fdf7e45f226db5ca5da050c2af14c"
+  }
+}

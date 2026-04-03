@@ -104,3 +104,50 @@ python scripts/build_teacher_cache.py --config configs/v0_mixed_corpus.yaml --li
 python scripts/build_teacher_cache.py --config configs/v0_mixed_corpus.yaml --limit 8 --split val --overwrite --verify
 python scripts/train_v0.py --config configs/v0_mixed_corpus.yaml --fast-dev-run
 ```
+
+---
+
+## Decision: Runtime Policy via teacher_state.mode (2026-03-22)
+
+**Context**: The original implementation used a logits-only concept (`teacher_logits_source`) that only controlled whether KL loss was computed, not the actual source of teacher states. Runtime policy is now centralized through `teacher_state.mode`.
+
+**Decision**: Three operational modes are supported:
+
+1. **`offline_cache`**: Uses pre-built teacher cache. Cache compatibility is validated before training starts (model identity, layer span, seq_len, store_logits when kl_weight > 0). This is the default and recommended mode for production training.
+
+2. **`online_no_cache`**: Uses live teacher extraction via `QwenInspector` on each training step. Token batches come from the corpus dataloader (not cache). Suitable for debugging or when cache regeneration is expensive.
+
+3. **`online_write_through_cache`**: Same live extraction as `online_no_cache`, but also persists teacher states to cache using the same shard format as offline cache. Useful for bootstrapping a new cache or incrementally extending an existing one.
+
+**Cache compatibility validation** (`src/training/data.py::validate_cache_compatibility`) enforces:
+- `model_name` match
+- `model_revision` match
+- `start_layer` / `end_layer` match
+- `span_depth` match
+- `seq_len` match
+- `store_logits=True` when `kl_weight > 0`
+
+**Live extraction** reuses `QwenInspector` from `src/model/qwen_parity.py`. Extracted outputs are:
+- `h_start`: hidden state before replacement span
+- `h_target`: hidden state after replacement span
+- `velocity_target = h_target - h_start`
+- `teacher_logits`: final logits (if `store_logits=True` in config)
+
+**Implementation** (`src/training/trainer.py`):
+- `train_step` and `val_step` both call `_maybe_extract_teacher_states()` for online modes
+- `QwenInspector` is initialized lazily on first extraction (not at Trainer construction time)
+- Write-through cache writes use `TeacherCacheWriter.write_shard()` with compatible format
+
+**Smoke commands**:
+```bash
+# Offline mode (requires compatible cache)
+python scripts/train_v0.py --config configs/v0_mixed_corpus_plus_kl_loss.yaml --limit-train-batches 1 --limit-val-batches 1
+
+# Online no-cache (live extraction, no persistence)
+python scripts/train_v0.py --config configs/v0_teacher_state_online_no_cache_smoke.yaml --limit-train-batches 1 --limit-val-batches 1
+
+# Write-through (live extraction + cache persistence)
+python scripts/train_v0.py --config configs/v0_teacher_state_write_through_cache_smoke.yaml --limit-train-batches 1 --limit-val-batches 1
+```
+
+**Open question**: Whether write-through cache should validate existing shards before overwriting (idempotency vs fresh regeneration).

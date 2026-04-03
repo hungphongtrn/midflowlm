@@ -8,9 +8,8 @@ import random
 import re
 import time
 from collections import Counter, defaultdict
-from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import torch
 import yaml
@@ -27,10 +26,7 @@ from src.eval.text_checkpoint_sweep import (
 logger = logging.getLogger(__name__)
 
 
-class PromptBehavior(str, Enum):
-    DEFAULT = "default"
-    STRIPPED = "stripped"
-    CLOSED_THINK = "closed_think"
+PromptBehavior = Literal["default", "stripped", "closed_think"]
 
 
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
@@ -88,7 +84,7 @@ def create_mmlu_pro_prompt(
     question: str,
     options: list[str],
     tokenizer: PreTrainedTokenizerBase,
-    prompt_behavior: PromptBehavior = PromptBehavior.DEFAULT,
+    prompt_behavior: PromptBehavior = "default",
 ) -> str:
     option_letters = [chr(ord("A") + i) for i in range(len(options))]
     options_text = "\n".join(
@@ -114,17 +110,29 @@ Answer:"""
         tokenize=False,
         add_generation_prompt=True,
     )
-    if prompt_behavior == PromptBehavior.STRIPPED:
+    if prompt_behavior == "stripped":
+        # Strip any existing think tags from the prompt
+        prompt = re.sub(
+            r"<\|im_start\|>assistant\n<think>\n.*?</think>\n",
+            "",
+            prompt,
+            flags=re.DOTALL,
+        )
         prompt = "<|im_start|>user\n" + prompt + "<|im_start|>assistant\n" + prompt
-    elif prompt_behavior == PromptBehavior.CLOSED_THINK:
+    elif prompt_behavior == "closed_think":
         prompt = (
             "<|im_start|>assistant\n<think>\n"
             + prompt
             + "<|im_start|>assistant\n"
             + prompt
         )
-    else:  # "default" - preserve prompt unchanged
-        pass
+    else:  # "default" - same as closed_think for backward compatibility
+        prompt = (
+            "<|im_start|>assistant\n<think>\n"
+            + prompt
+            + "<|im_start|>assistant\n"
+            + prompt
+        )
     return prompt
 
 
@@ -356,7 +364,7 @@ def run_mmlu_pro_behavior_observation(
     include_teacher: bool = True,
     solver_method: str = "euler",
     stop_on_eos: bool = True,
-    prompt_behavior: PromptBehavior = PromptBehavior.DEFAULT,
+    prompt_behavior: PromptBehavior = "default",
 ) -> dict[str, Any]:
     config = load_config(config_path)
     max_steps_t = int(config["model"]["max_steps_T"])

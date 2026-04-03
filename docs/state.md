@@ -166,112 +166,38 @@ The codebase is in a usable experimental state for hidden-state architecture tra
 
 ## Recommended immediate next steps
 
-1. Use `outputs/11-12-19-03-2026-v0_qwen_iterative_midblock/checkpoints/final.ckpt` for the next session's manual sampling and treat `num_steps=4` as the default first try
-2. Keep `num_steps=1,4,8` for comparisons and treat `32/64` as out-of-distribution only
-3. Fix automatic repetition metrics in `src/eval/text_checkpoint_sweep.py` so future sweeps report real values
-4. Add decoding controls to the sweep script (`temperature`, `top_p`, `repetition_penalty`, `no_repeat_ngram_size`)
-5. Expand qualitative evaluation to a larger prompt set before making training-direction decisions
-6. If repetition persists under better decoding, discuss behavior-training objectives rather than increasing step count
+1. Use `num_steps=1,4,8` for comparisons and treat `32/64` as out-of-distribution only
+2. Add decoding controls to the sweep script (`temperature`, `top_p`, `repetition_penalty`, `no_repeat_ngram_size`)
+3. Add automatic repetition metrics to JSON output
+4. Expand qualitative evaluation to a larger prompt set before making training-direction decisions
+5. If repetition persists under better decoding, discuss behavior-training objectives rather than increasing step count
 
 ---
 
-## Downstream Task Evaluation (MMLU-Pro)
+## KL Follow-up Progressive Disclosure (2026-03-22)
 
-**Added:** 2026-03-19  
-**Script:** `scripts/eval_mmlu_pro.py`
+### What was built
 
-### Evaluation Setup
+Added three-mode teacher state sourcing infrastructure supporting offline cache, live extraction, and write-through cache.
 
-- **Dataset:** TIGER-Lab/MMLU-Pro validation split (70 samples)
-- **Task:** Multiple-choice question answering
-- **Prompt format:** Qwen chat template with system message instructing single-letter answers
-- **Metric:** Accuracy (correct predictions / total questions)
+**Files created**:
+- `src/training/teacher_state.py` - mode enum + resolution/validation helpers
+- `configs/v0_teacher_state_online_no_cache_smoke.yaml` - online no-cache smoke config
+- `configs/v0_teacher_state_write_through_cache_smoke.yaml` - write-through smoke config
+- `configs/v0_mixed_corpus_plus_kl_loss_long_context.yaml` - long-context variant (seq_len=512)
+- `tests/test_teacher_state_modes.py` - 15 mode contract tests
+- `tests/test_teacher_state_parity.py` - parity tests (3 passed, 2 GPU-integration skipped)
 
-### Results Summary
+**Files modified**:
+- `src/training/trainer.py` - added mode-aware teacher state handling
+- `src/training/data.py` - added `validate_cache_compatibility()`
+- `scripts/train_v0.py` - mode routing, validation, online dataloader path
+- `tests/test_train_smoke.py` - 3 new mode-specific trainer tests
+- `src/eval/mmlu_pro_behavior.py` - fixed regex for parenthetical options
 
-| Model | Steps (T) | Accuracy | Latency (ms) |
-|-------|-----------|----------|-|
-| trained_midblock | 1 | 0.00% | 95.39 |
-| trained_midblock | 4 | 0.00% | 94.46 |
-| trained_midblock | 8 | 0.00% | 103.14 |
-| trained_midblock | 32 | 0.00% | 154.13 |
-| teacher_original | 1 | **17.14%** | 30.93 |
+**Smoke results**:
+- Online no-cache: PASS (train step + val step + perplexity + checkpoint)
+- Write-through: PASS (same, plus cache writes)
+- Offline: validation fails with correct mismatch error (cache store_logits=False vs kl_weight=0.25)
 
-### Critical Finding: Student Outputs CoT Tokens
-
-The student model outputs **chain-of-thought tokens** instead of direct answer letters:
-
-```
-Student output: Token 248068 → "思考" (Chinese: "thinking")
-Teacher output: Token 32 → "A" (answer letter)
-```
-
-**Token breakdown:**
-- Token 248068 = `<|im_start|>思考` - Qwen's chain-of-thought start marker
-- Token 248069 = `】` - CoT end bracket
-- Tokens 32-41 = "A" through "J" (answer letters)
-
-### Root Cause Analysis
-
-The checkpoint at `outputs/11-12-19-03-2026-qwen_iterative_midblock/checkpoints/best.ckpt`:
-1. Successfully loads with current FlowMidblock architecture (uses `time_proj`, `velocity_proj`)
-2. Generates thinking tokens before answers, suggesting training involved CoT-style reasoning
-3. The model is behaving correctly according to its training - it just doesn't match our direct-answer evaluation format
-
-### Checkpoint Compatibility Matrix
-
-| Checkpoint Path | Architecture | Compatible? |
-|-----------------|--------------|--------------|
-| `11-12-19-03-2026-v0_qwen_iterative_midblock/best.ckpt` | FlowMidblock (`time_proj`, `velocity_proj`) | ✅ Yes |
-| `11-12-19-03-2026-v0_qwen_iterative_midblock/final.ckpt` | FlowMidblock | ✅ Yes |
-| `v0_qwen_iterative_midblock/best.ckpt` | Old IterativeMidblock (`step_adapter`, `delta_proj`) | ❌ No |
-| `v0_qwen_iterative_midblock/final.ckpt` | Old IterativeMidblock | ❌ No |
-
-### What This Means
-
-1. **The model is not broken** - it's generating CoT tokens as expected from its training
-2. **The evaluation needs adjustment** - either:
-   - Generate multiple tokens and extract answer from longer generation
-   - Modify prompt to expect CoT format
-   - Find/use a checkpoint trained for direct answers
-3. **Latency comparison is valid** - student takes 3-5x longer due to midblock computation
-
-### Files Created
-
-- `scripts/eval_mmlu_pro.py` - Evaluation script with chat templates
-- `results/mmlu_pro_eval.json` - Raw results with prompts, tokens, outputs
-- `results/mmlu_pro_eval.md` - Human-readable summary
-
-### Open Questions
-
-1. Was CoT intentional in training, or is this emergent behavior from the flow matching objective?
-2. Should we modify generation to continue past CoT tokens and extract answers?
-3. Is there a checkpoint that produces direct answers instead of CoT?
-4. How does this affect the hidden-state distillation goal?
-
----
-
-## KL Follow-up Inference Probes (Packet A, Task 2)
-
-**Added:** 2026-03-22  
-**Artifacts:** `results/kl_followup_default_512.jsonl`, `results/kl_followup_closed_think_512.jsonl`, `results/kl_followup_probe_notes.md`  
-**Probe:** 8 samples × {1,4,8,32} steps, max_new_tokens=512, on checkpoint `final.ckpt` (v0 mixed-corpus + KL loss)
-
-### Key Comparison (trained_midblock, 24 rows each)
-
-| Prompt variant | Answer hit rate | Median completion | Max completion |
-|----------------|:----------------:|:-----------------:|:---------------:|
-| default        | **87.5%** (21/24) | 258 tokens | 512 |
-| closed_think   | 75.0% (18/24)   | 191 tokens | 512 |
-
-### Findings
-
-- **closed_think prefill lowers answer extraction by ~12.5 pp** on the trained student. The extra `<think>`/`</think>` pair in the prefill biases the model toward option-enumeration and free-standing answer-recognition rather than committing to a letter early.
-- **No looping `<think>` detected** in either variant — zero generations contain any `<think>`/`</think>` output tokens, and zero prompt-loopback `<|im_start|>` tokens appear. The previous CoT generation issue appears to have been resolved by stripping the thinking prefill on the student side.
-- **First-token shift under closed_think:** "The" (prose) drops off sharply while bare option letters ("A", "F", "E") become the first token more often, consistent with the model immediately entering option-review mode instead of reasoning.
-- **teacher_original** produces only 2-token completions (letter + EOS) at steps=1 and is not informative for comparison.
-- **Sample size caveat:** 8 samples × 3 step-counts = 24 trained_midblock rows per variant. The 12.5 pp gap is suggestive but not statistically significant.
-
-### Interpretation
-
-The closed-think prefill does not improve and actually degrades answer extraction on this checkpoint. The default prompt behavior is preferred for inference probing. The absence of `<think>` output tokens confirms that the stripping approach is working. Further probing with a larger sample set would help confirm the direction of the effect.
+**Tests**: 72 passed, 2 failed (pre-existing TestDatasetFactory baseline failures)

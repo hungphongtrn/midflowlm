@@ -35,7 +35,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.model.student_qwen import FrozenQwenStudent
 from src.training.losses import DistillationLoss
 from src.training.trainer import Trainer
-from src.training.data import create_cache_dataloader, get_cache_info
+from src.training.data import (
+    create_cache_dataloader,
+    get_cache_info,
+    validate_cache_compatibility,
+)
+from src.training.teacher_state import (
+    resolve_teacher_state_mode,
+    validate_teacher_state_config,
+    TeacherStateMode,
+)
+from src.data.dataset_factory import get_experiment_dataloaders
 
 
 def format_train_batch_log(batch_idx: int, metrics: Dict[str, float]) -> str:
@@ -508,44 +518,131 @@ def create_loss_function(config: dict) -> DistillationLoss:
 def create_dataloaders(config: dict, cache_dir: str) -> tuple:
     """Create train and validation dataloaders.
 
+    Routes to the appropriate dataloader based on teacher_state.mode:
+    - offline_cache: Uses create_cache_dataloader (cache-based)
+    - online_no_cache: Uses get_experiment_dataloaders (token dataset)
+    - online_write_through_cache: Uses get_experiment_dataloaders (token dataset)
+
     Args:
         config: Configuration dictionary
-        cache_dir: Directory containing cache files
+        cache_dir: Directory containing cache files (used for offline_cache mode)
 
     Returns:
         Tuple of (train_dataloader, val_dataloader)
     """
+    teacher_state_mode = resolve_teacher_state_mode(config)
+
+    if teacher_state_mode == TeacherStateMode.OFFLINE_CACHE.value:
+        validate_cache_compatibility(config, cache_dir)
+
+        data_config = config.get("data", {})
+        seed = config.get("seed", 1337)
+
+        batch_size = data_config.get("batch_size", 8)
+        num_workers = data_config.get("num_workers", 0)
+        pin_memory = data_config.get("pin_memory", False)
+
+        train_dataloader = create_cache_dataloader(
+            cache_dir=cache_dir,
+            batch_size=batch_size,
+            shuffle=True,
+            seed=seed,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            split="train",
+        )
+
+        val_dataloader = create_cache_dataloader(
+            cache_dir=cache_dir,
+            batch_size=batch_size,
+            shuffle=False,
+            seed=seed + 1,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            split="val",
+        )
+
+        return train_dataloader, val_dataloader
+
+    elif teacher_state_mode in (
+        TeacherStateMode.ONLINE_NO_CACHE.value,
+        TeacherStateMode.ONLINE_WRITE_THROUGH_CACHE.value,
+    ):
+        dataloaders = _create_online_dataloaders(config)
+        return dataloaders["train"], dataloaders["val"]
+
+    else:
+        raise ValueError(f"Unknown teacher_state mode: {teacher_state_mode}")
+
+
+def _create_online_dataloaders(config: dict) -> dict:
+    """Create dataloaders for online teacher_state modes.
+
+    Reuses get_experiment_dataloaders from dataset_factory for token dataset loading.
+    The config is adapted to namespace-compatible format expected by dataset_factory.
+
+    Args:
+        config: Configuration dictionary with data.loader and data.mixture_components
+
+    Returns:
+        Dictionary with 'train' and 'val' dataloaders
+    """
+    from transformers import AutoTokenizer
+
     data_config = config.get("data", {})
-    seed = config.get("seed", 1337)
-
-    # Determine batch size
+    model_config = config.get("model", {})
     batch_size = data_config.get("batch_size", 8)
-    num_workers = data_config.get("num_workers", 0)
-    pin_memory = data_config.get("pin_memory", False)
 
-    # Create train dataloader
-    train_dataloader = create_cache_dataloader(
-        cache_dir=cache_dir,
+    class ConfigAdapter:
+        def __init__(self, config_dict):
+            self._config = config_dict
+
+        def __getattr__(self, name):
+            if name == "data":
+                return DataConfigAdapter(self._config.get("data", {}))
+            if name == "model":
+                return ModelConfigAdapter(self._config.get("model", {}))
+            return self._config.get(name)
+
+    class DataConfigAdapter:
+        def __init__(self, data_dict):
+            self._data = data_dict
+            for k, v in data_dict.items():
+                setattr(self, k, v)
+
+        def __getattr__(self, name):
+            if name.startswith("_"):
+                raise AttributeError(name)
+            return self._data.get(name)
+
+    class ModelConfigAdapter:
+        def __init__(self, model_dict):
+            self._model = model_dict
+            for k, v in model_dict.items():
+                setattr(self, k, v)
+
+        def __getattr__(self, name):
+            if name.startswith("_"):
+                raise AttributeError(name)
+            return self._model.get(name)
+
+    adapted_config = ConfigAdapter(config)
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_config["name"],
+        revision=model_config.get("revision"),
+        trust_remote_code=True,
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    dataloaders = get_experiment_dataloaders(
+        config=adapted_config,
+        tokenizer=tokenizer,
         batch_size=batch_size,
-        shuffle=True,
-        seed=seed,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        split="train",
     )
 
-    # Create val dataloader
-    val_dataloader = create_cache_dataloader(
-        cache_dir=cache_dir,
-        batch_size=batch_size,
-        shuffle=False,
-        seed=seed + 1,  # Different seed for val
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        split="val",
-    )
-
-    return train_dataloader, val_dataloader
+    return dataloaders
 
 
 def main():
@@ -625,31 +722,58 @@ def main():
         device = args.device
     logger.info(f"Using device: {device}")
 
-    # Get cache directory
-    cache_config = config.get("teacher_cache", {})
-    cache_dir = cache_config.get("cache_dir", "./cache")
+    # Resolve and validate teacher_state mode
+    teacher_state_mode = resolve_teacher_state_mode(config)
+    logger.info(f"Teacher state mode: {teacher_state_mode}")
 
-    if not Path(cache_dir).exists():
-        error_msg = f"Cache directory not found: {cache_dir}"
+    try:
+        validate_teacher_state_config(config)
+    except ValueError as e:
+        error_msg = f"Teacher state config validation failed: {str(e)}"
         logger.error(error_msg)
-        logger.error("Please run scripts/build_teacher_cache.py first")
         if structured_logger:
             structured_logger.log_error(
                 step=None,
                 epoch=None,
-                error_type="missing_cache",
+                error_type="teacher_state_validation",
                 error_message=error_msg,
-                context={"cache_dir": cache_dir},
+                context={"teacher_state_mode": teacher_state_mode, "config": config},
             )
         sys.exit(1)
 
-    # Print cache info
+    # Get cache directory (only relevant for offline_cache mode)
+    cache_config = config.get("teacher_cache", {})
+    cache_dir = cache_config.get("cache_dir", "./cache")
+
     cache_info_dict = {}
-    try:
-        cache_info_dict = get_cache_info(cache_dir)
-        logger.info(f"Cache info: {cache_info_dict}")
-    except Exception as e:
-        logger.warning(f"Could not load cache info: {e}")
+    if teacher_state_mode == TeacherStateMode.OFFLINE_CACHE.value:
+        if not Path(cache_dir).exists():
+            error_msg = f"Cache directory not found: {cache_dir}"
+            logger.error(error_msg)
+            logger.error("Please run scripts/build_teacher_cache.py first")
+            if structured_logger:
+                structured_logger.log_error(
+                    step=None,
+                    epoch=None,
+                    error_type="missing_cache",
+                    error_message=error_msg,
+                    context={"cache_dir": cache_dir},
+                )
+            sys.exit(1)
+
+        try:
+            cache_info_dict = get_cache_info(cache_dir)
+            logger.info(f"Cache info: {cache_info_dict}")
+        except Exception as e:
+            logger.warning(f"Could not load cache info: {e}")
+    elif teacher_state_mode == TeacherStateMode.ONLINE_NO_CACHE.value:
+        logger.info(
+            "Online no-cache mode: token-batch dataloaders enabled; live teacher extraction remains pending"
+        )
+    elif teacher_state_mode == TeacherStateMode.ONLINE_WRITE_THROUGH_CACHE.value:
+        logger.info(
+            "Online write-through cache mode: token-batch dataloaders enabled; live extraction and cache writing remain pending"
+        )
 
     # Create model
     logger.info("Creating student model...")
@@ -741,7 +865,7 @@ def main():
             )
         raise
 
-    # Create dataloaders
+    # Create dataloaders - route based on teacher_state mode
     logger.info("Creating dataloaders...")
     try:
         train_dataloader, val_dataloader = create_dataloaders(config, cache_dir)
@@ -758,7 +882,11 @@ def main():
                 error_type="dataloader_creation",
                 error_message=error_msg,
                 traceback=tb,
-                context={"data_config": config.get("data", {}), "cache_dir": cache_dir},
+                context={
+                    "data_config": config.get("data", {}),
+                    "cache_dir": cache_dir,
+                    "teacher_state_mode": teacher_state_mode,
+                },
             )
         raise
 

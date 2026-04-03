@@ -12,7 +12,88 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, cast
 from torch.utils.data import Dataset, DataLoader, Sampler
 
-from src.data.teacher_cache import load_metadata, resolve_split_cache_dir
+from src.data.teacher_cache import (
+    load_metadata as _load_metadata,
+    resolve_split_cache_dir,
+)
+
+
+def load_metadata(cache_dir):
+    return _load_metadata(cache_dir)
+
+
+def validate_cache_compatibility(
+    config: Dict[str, Any], metadata_or_cache_dir: Any
+) -> None:
+    """Validate that offline cache metadata is compatible with the active config.
+
+    Args:
+        config: Configuration dictionary with model, replacement_model, data, and loss settings
+        metadata_or_cache_dir: Cache metadata object or cache directory path
+
+    Raises:
+        ValueError: If any required cache metadata field is incompatible with config
+    """
+    if isinstance(metadata_or_cache_dir, (str, Path)):
+        cache_dir = Path(metadata_or_cache_dir)
+        split_cache_dir = resolve_split_cache_dir(cache_dir, "train")
+        if split_cache_dir.exists():
+            metadata = _load_metadata(split_cache_dir)
+        else:
+            metadata = _load_metadata(cache_dir)
+    else:
+        metadata = metadata_or_cache_dir
+
+    model_config = config.get("model", {})
+    replacement_config = config.get("replacement_model", {})
+    data_config = config.get("data", {})
+    loss_config = config.get("loss", {})
+
+    config_model_name = model_config.get("name")
+    if metadata.model_name != config_model_name:
+        raise ValueError(
+            f"Cache model_name mismatch: cache={metadata.model_name}, config={config_model_name}"
+        )
+
+    config_model_revision = model_config.get("revision")
+    if metadata.model_revision != config_model_revision:
+        raise ValueError(
+            f"Cache model_revision mismatch: cache={metadata.model_revision}, config={config_model_revision}"
+        )
+
+    config_start_layer = replacement_config.get("start_layer")
+    if metadata.start_layer != config_start_layer:
+        raise ValueError(
+            f"Cache start_layer mismatch: cache={metadata.start_layer}, config={config_start_layer}"
+        )
+
+    config_end_layer = replacement_config.get("end_layer")
+    if metadata.end_layer != config_end_layer:
+        raise ValueError(
+            f"Cache end_layer mismatch: cache={metadata.end_layer}, config={config_end_layer}"
+        )
+
+    config_span_depth = None
+    if config_start_layer is not None and config_end_layer is not None:
+        config_span_depth = config_end_layer - config_start_layer + 1
+    if metadata.span_depth != config_span_depth:
+        raise ValueError(
+            f"Cache span_depth mismatch: cache={metadata.span_depth}, config={config_span_depth}"
+        )
+
+    config_seq_len = data_config.get("seq_len")
+    if config_seq_len is not None and metadata.seq_len != config_seq_len:
+        raise ValueError(
+            f"Cache seq_len mismatch: cache={metadata.seq_len}, config={config_seq_len}. "
+            f"Rebuild cache with correct seq_len or update config."
+        )
+
+    kl_weight = float(loss_config.get("kl_weight", 0.0))
+    if kl_weight > 0.0 and not metadata.store_logits:
+        raise ValueError(
+            f"Cache store_logits is False but kl_weight={kl_weight} requires logits. "
+            f"Rebuild cache with store_logits=True or set kl_weight=0."
+        )
 
 
 class CacheDataset(Dataset):

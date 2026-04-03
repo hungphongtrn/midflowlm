@@ -1,19 +1,19 @@
-experiment_name: "v0_qwen_mixed_corpus_midblock_plus_kl_loss"
+experiment_name: "v1_mixed_corpus_hs_kl_ce"
+
+teacher_state:
+  mode: online_write_through_cache
 
 teacher_cache:
   enabled: true
-  cache_dir: "./cache/mixed_qwen_boundary_states"
-  store_logits: false
+  cache_dir: "./cache/v1_mixed_corpus_hs_kl_ce"
+  store_logits: true
   store_hidden_states: true
-  overwrite: false
-
-teacher_state:
-  mode: offline_cache
+  overwrite: true
 
 data:
   loader: "mixture"
   seq_len: 128
-  batch_size: 10
+  batch_size: 8
   num_workers: 4
   pin_memory: true
   persistent_workers: true
@@ -87,13 +87,13 @@ loss:
   endpoint_weight: 0.0
   trajectory_weight: 0.0
   kl_weight: 0.25
-  ce_weight: 0.0
+  ce_weight: 1.0
   mask_padding_tokens: true
 
 model:
   name: "Qwen/Qwen3.5-0.8B"
   revision: null
-  max_steps_T: 32
+  max_steps_T: 8
   time_domain: [0.0, 1.0]
   time_embedding: "sinusoidal"
   ode_solver:
@@ -153,11 +153,11 @@ train_loop:
   val_check_interval: 250
   gradient_checkpointing: false
   sample_continuous_time: true
-  checkpoint_dir: "./outputs/v0_qwen_mixed_corpus_midblock_plus_kl_loss/checkpoints"
+  checkpoint_dir: "./outputs/v1_mixed_corpus_hs_kl_ce/checkpoints"
   resume_from_checkpoint: null
 
 logging:
-  log_dir: "./outputs/v0_qwen_mixed_corpus_midblock_plus_kl_loss/logs"
+  log_dir: "./outputs/v1_mixed_corpus_hs_kl_ce/logs"
   save_top_k: 2
   monitor: "val/total_loss"
   mode: "min"

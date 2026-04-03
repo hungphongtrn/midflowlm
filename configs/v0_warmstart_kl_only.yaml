@@ -1,22 +1,38 @@
-experiment_name: "v0_qwen_mixed_corpus_midblock_plus_kl_loss"
+experiment_name: "v0_warmstart_kl_only"
 
-teacher_cache:
-  enabled: true
-  cache_dir: "./cache/mixed_qwen_boundary_states"
-  store_logits: false
-  store_hidden_states: true
-  overwrite: false
+seed: 1337
 
-teacher_state:
-  mode: offline_cache
+model:
+  name: "Qwen/Qwen3.5-0.8B"
+  revision: null
+  max_steps_T: 8
+  train_T_values: [4]
+  train_T_weights: [1.0]
+  step_embedding: "discrete"
+  reuse_qwen_modules: true
+
+replacement_model:
+  family: "minfm-hidden-refiner"
+  source_repo: "external/minFM"
+  source_commit: "2b15c5ffa9f6a083650994e385ee11ca23ee7ab7"
+  start_layer: 8
+  end_layer: 11
+  architecture_mode: "causal_hidden_refiner"
+  depth: 4
+  mlp_ratio: 4.0
+  qkv_bias: true
+  use_qwen_causal_mask: true
+  use_step_conditioning: true
+  conditioning_mode: "timestep_plus_layer_boundary"
+  init_strategy: "fresh"
 
 data:
   loader: "mixture"
-  seq_len: 128
-  batch_size: 10
-  num_workers: 4
+  seq_len: 1024
+  batch_size: 1
+  num_workers: 2
   pin_memory: true
-  persistent_workers: true
+  persistent_workers: false
   shuffle_seed: 1337
   mixture_components:
     - name: "fineweb_edu"
@@ -43,6 +59,7 @@ data:
       train_split: "train"
       val_split: "validation"
       format_type: "mcq_choices"
+      use_chat_template: true
       question_field: "question"
       choices_field: "choices"
       answer_field: "answerKey"
@@ -54,6 +71,7 @@ data:
       train_split: "train"
       val_split: "validation"
       format_type: "mcq_choices"
+      use_chat_template: true
       question_field: "question"
       choices_field: "choices"
       answer_field: "answerKey"
@@ -65,6 +83,7 @@ data:
       train_split: "train"
       val_split: "validation"
       format_type: "mcq_choices"
+      use_chat_template: true
       question_field: "question"
       choices_field: "choices"
       answer_field: "answerKey"
@@ -76,6 +95,7 @@ data:
       train_split: "train"
       val_split: "validation"
       format_type: "mcq_choices"
+      use_chat_template: true
       question_field: "question_stem"
       choices_field: "choices"
       answer_field: "answerKey"
@@ -87,51 +107,9 @@ loss:
   endpoint_weight: 0.0
   trajectory_weight: 0.0
   kl_weight: 0.25
+  teacher_logits_source: "online"
   ce_weight: 0.0
   mask_padding_tokens: true
-
-model:
-  name: "Qwen/Qwen3.5-0.8B"
-  revision: null
-  max_steps_T: 32
-  time_domain: [0.0, 1.0]
-  time_embedding: "sinusoidal"
-  ode_solver:
-    method: "euler"
-    atol: 1.0e-5
-    rtol: 1.0e-5
-  reuse_qwen_modules: true
-
-replacement_model:
-  family: "minfm-hidden-refiner"
-  source_repo: "external/minFM"
-  source_commit: "2b15c5ffa9f6a083650994e385ee11ca23ee7ab7"
-  start_layer: 8
-  end_layer: 11
-  architecture_mode: "causal_hidden_refiner"
-  depth: 4
-  mlp_ratio: 4.0
-  qkv_bias: true
-  use_qwen_causal_mask: true
-  predict_velocity: true
-  use_step_conditioning: false
-  use_time_conditioning: true
-  conditioning_mode: "timestep_plus_layer_boundary"
-  init_strategy: "fresh"
-  trajectory_alignment:
-    T_less_than_depth:
-      policy: "compression"
-      description: "Compress teacher trajectory to match student steps"
-      method: "uniform_sampling"
-    T_equals_depth:
-      policy: "exact"
-      description: "Exact layerwise trajectory matching"
-      method: "one_to_one_mapping"
-    T_greater_than_depth:
-      policy: "expansion"
-      description: "Expand/interpolate teacher trajectory (approximate)"
-      method: "linear_interpolation"
-      note: "Results are approximate when T exceeds teacher depth"
 
 optimizer:
   name: "adamw"
@@ -147,17 +125,22 @@ scheduler:
 
 train_loop:
   precision: "bf16-mixed"
-  max_epochs: 3
-  accumulate_grad_batches: 4
+  max_epochs: 1
+  accumulate_grad_batches: 16
+  sample_continuous_time: true
   log_every_n_steps: 10
   val_check_interval: 250
-  gradient_checkpointing: false
-  sample_continuous_time: true
-  checkpoint_dir: "./outputs/v0_qwen_mixed_corpus_midblock_plus_kl_loss/checkpoints"
-  resume_from_checkpoint: null
+  gradient_checkpointing: true
+  checkpoint_dir: "./outputs/v0_warmstart_kl_only/checkpoints"
+  init_from_checkpoint: "./outputs/v0_online_no_cache_mixed_ce_kl/checkpoints/best.ckpt"
 
 logging:
-  log_dir: "./outputs/v0_qwen_mixed_corpus_midblock_plus_kl_loss/logs"
+  log_dir: "./outputs/v0_warmstart_kl_only/logs"
   save_top_k: 2
   monitor: "val/total_loss"
   mode: "min"
+
+tensorboard:
+  enabled: true
+  log_dir: "./outputs/v0_warmstart_kl_only/tensorboard"
+  log_every_n_steps: 10

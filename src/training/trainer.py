@@ -19,6 +19,9 @@ from typing import Dict, List, Optional, Union, Any, Tuple
 from collections import defaultdict
 import logging
 
+from src.model.qwen_parity import QwenInspector
+from src.training.teacher_state import get_teacher_state_mode, TeacherStateMode
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,7 +52,6 @@ class Trainer:
         device: Union[str, torch.device] = "cuda",
         train_dataloader: Optional[Any] = None,
         val_dataloader: Optional[Any] = None,
-        teacher_model: Optional[nn.Module] = None,
     ):
         self.model = model
         self.loss_fn = loss_fn
@@ -57,7 +59,6 @@ class Trainer:
         self.device = torch.device(device) if isinstance(device, str) else device
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
-        self.teacher_model = teacher_model
 
         # Training state
         self.global_step = 0
@@ -69,21 +70,12 @@ class Trainer:
         self.scheduler_config = config.get("scheduler", {})
         self.train_loop_config = config.get("train_loop", {})
         self.model_config = config.get("model", {})
-        self.loss_config = config.get("loss", {})
-        self.kl_weight = float(self.loss_config.get("kl_weight", 0.0))
-        self.teacher_logits_source = self.loss_config.get(
-            "teacher_logits_source",
-            "cache" if self.kl_weight > 0.0 else "none",
-        )
-        self._cached_teacher_logits_cpu = None
 
-        if self.teacher_model is not None:
-            self.teacher_model.eval()
-            for param in self.teacher_model.parameters():
-                param.requires_grad = False
-
-        # Setup precision
+        # Setup precision first (needed for teacher state mode setup)
         self._setup_precision()
+
+        # Resolve teacher_state mode (needs precision set)
+        self._setup_teacher_state_mode()
 
         # Setup optimizer
         self.optimizer = self._create_optimizer()
@@ -119,105 +111,15 @@ class Trainer:
         # Logging
         self.log_every_n_steps = self.train_loop_config.get("log_every_n_steps", 10)
 
+        # Cache writer for write-through mode (initialized lazily)
+        self._cache_writer = None
+
         logger.info(f"Initialized Trainer on device: {self.device}")
         logger.info(f"  Precision: {self.precision}")
         logger.info(f"  AMP enabled: {self.use_amp}")
         logger.info(f"  Gradient accumulation: {self.accumulate_grad_batches}")
         logger.info(f"  Train T values: {self.train_T_values}")
-        logger.info(f"  Online teacher KL: {self.uses_online_teacher_logits()}")
-
-    def uses_online_teacher_logits(self) -> bool:
-        """Return whether KL logits should be recomputed from a live teacher."""
-        return (
-            self.teacher_model is not None
-            and self.kl_weight > 0.0
-            and self.teacher_logits_source == "online"
-        )
-
-    def _autocast_context(self):
-        """Create autocast context for CUDA mixed precision, if enabled."""
-        if not self.use_amp or self.device.type != "cuda":
-            return None
-
-        return (
-            torch.amp.autocast("cuda", dtype=self.amp_dtype)
-            if hasattr(torch, "amp")
-            else torch.cuda.amp.autocast(dtype=self.amp_dtype)
-        )
-
-    def _compute_teacher_logits_cpu(
-        self, batch: Dict[str, torch.Tensor]
-    ) -> Optional[torch.Tensor]:
-        """Run the frozen teacher first and keep logits on CPU until student loss."""
-        if not self.uses_online_teacher_logits():
-            return None
-
-        teacher_device = (
-            self.device if self.device.type == "cuda" else torch.device("cpu")
-        )
-        self.model.to("cpu")
-        if self.device.type == "cuda":
-            torch.cuda.empty_cache()
-
-        try:
-            self.teacher_model.to(teacher_device)
-            self.teacher_model.eval()
-
-            teacher_inputs = {
-                "input_ids": batch["input_ids"].to(teacher_device),
-                "attention_mask": (
-                    batch["attention_mask"].to(teacher_device)
-                    if "attention_mask" in batch
-                    else None
-                ),
-            }
-
-            with torch.no_grad():
-                autocast_context = self._autocast_context()
-                if autocast_context is not None:
-                    with autocast_context:
-                        teacher_outputs = self.teacher_model(
-                            input_ids=teacher_inputs["input_ids"],
-                            attention_mask=teacher_inputs["attention_mask"],
-                            return_dict=True,
-                        )
-                else:
-                    teacher_outputs = self.teacher_model(
-                        input_ids=teacher_inputs["input_ids"],
-                        attention_mask=teacher_inputs["attention_mask"],
-                        return_dict=True,
-                    )
-
-            if isinstance(teacher_outputs, dict):
-                teacher_logits = teacher_outputs["logits"]
-            else:
-                teacher_logits = teacher_outputs.logits
-
-            self._cached_teacher_logits_cpu = teacher_logits.detach().to("cpu")
-            return self._cached_teacher_logits_cpu
-        finally:
-            self.teacher_model.to("cpu")
-            self.model.to(self.device)
-            if self.device.type == "cuda":
-                torch.cuda.empty_cache()
-
-    def _prepare_batch(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Move batch tensors to the student device and attach live teacher logits."""
-        prepared_batch = {
-            k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-            for k, v in batch.items()
-        }
-
-        if self._cached_teacher_logits_cpu is not None:
-            prepared_batch["teacher_logits"] = self._cached_teacher_logits_cpu.to(
-                self.device
-            )
-
-        return prepared_batch
-
-    def _clear_cached_teacher_logits(self) -> None:
-        """Drop any per-batch cached teacher logits after the step completes."""
-        self._cached_teacher_logits_cpu = None
+        logger.info(f"  Teacher state mode: {self.teacher_state_mode.value}")
 
     def _setup_precision(self):
         """Setup precision settings for training."""
@@ -240,6 +142,160 @@ class Trainer:
             self.precision = "fp32"
             self.use_amp = False
             self.amp_dtype = torch.float32
+
+    def _setup_teacher_state_mode(self):
+        """Setup teacher state mode and initialize related components.
+
+        Resolves the teacher_state mode from config. Components like QwenInspector
+        and cache writer are initialized lazily on first use.
+        """
+        self.teacher_state_mode = get_teacher_state_mode(self.config)
+
+        self._inspector = None
+        self._cache_writer = None
+
+        logger.info(f"Teacher state mode: {self.teacher_state_mode.value}")
+        if self.teacher_state_mode.requires_live_teacher():
+            logger.info("  Live teacher extraction: enabled (lazy initialization)")
+        if self.teacher_state_mode.allow_cache_write():
+            logger.info("  Cache writing: enabled (lazy initialization)")
+
+    def _get_live_teacher_extractor(self):
+        """Get or create QwenInspector for live teacher state extraction.
+
+        Returns:
+            QwenInspector instance
+        """
+        if self._inspector is None:
+            model_name = self.model_config.get("name", "Qwen/Qwen3.5-0.8B")
+            replacement_config = self.config.get("replacement_model", {})
+            start_layer = replacement_config.get("start_layer", 8)
+            end_layer = replacement_config.get("end_layer", 11)
+
+            self._inspector = QwenInspector(
+                model_name=model_name,
+                start_layer=start_layer,
+                end_layer=end_layer,
+                device=self.device,
+                dtype=self.amp_dtype if self.use_amp else torch.float32,
+            )
+            logger.info(
+                f"Initialized QwenInspector for live extraction: model={model_name}, "
+                f"layers={start_layer}-{end_layer}"
+            )
+        return self._inspector
+
+    def _setup_cache_writer(self):
+        """Initialize cache writer for write-through mode."""
+        from src.data.teacher_cache import TeacherCacheWriter
+
+        teacher_cache_config = self.config.get("teacher_cache", {})
+        cache_dir = teacher_cache_config.get("cache_dir", "./cache/write_through")
+        model_name = self.model_config.get("name", "Qwen/Qwen3.5-0.8B")
+        replacement_config = self.config.get("replacement_model", {})
+        start_layer = replacement_config.get("start_layer", 8)
+        end_layer = replacement_config.get("end_layer", 11)
+        seq_len = self.config.get("data", {}).get("seq_len", 128)
+        store_logits = teacher_cache_config.get("store_logits", False)
+
+        self._cache_writer = TeacherCacheWriter(
+            cache_dir=cache_dir,
+            model_name=model_name,
+            start_layer=start_layer,
+            end_layer=end_layer,
+            seq_len=seq_len,
+            store_logits=store_logits,
+        )
+        logger.info(f"Initialized cache writer for write-through mode: {cache_dir}")
+
+    def _maybe_extract_teacher_states(
+        self, batch: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        """Extract teacher states for online modes if not already in batch.
+
+        For online_no_cache and online_write_through_cache modes, if the batch
+        doesn't contain h_start (i.e., comes from token dataset without pre-computed
+        teacher states), extract them using QwenInspector and optionally write to cache.
+
+        Args:
+            batch: Batch dictionary, possibly missing teacher states
+
+        Returns:
+            Batch with teacher states populated (h_start, velocity_target, optional h_target)
+        """
+        if "h_start" in batch and "velocity_target" in batch:
+            return batch
+
+        inspector = self._get_live_teacher_extractor()
+
+        logger.debug("Extracting live teacher states for online mode")
+        input_ids = batch["input_ids"]
+        attention_mask = batch.get("attention_mask")
+
+        with torch.no_grad():
+            outputs = inspector.extract_all(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+            )
+
+        h_start = outputs["h_start"]
+        h_target = outputs["h_target"]
+        velocity_target = h_target - h_start
+
+        teacher_batch = {
+            **batch,
+            "h_start": h_start,
+            "velocity_target": velocity_target,
+            "h_target": h_target,
+        }
+
+        if "logits" in outputs:
+            teacher_batch["teacher_logits"] = outputs["logits"]
+
+        if (
+            self.teacher_state_mode.allow_cache_write()
+            and self._cache_writer is not None
+        ):
+            self._write_teacher_states_to_cache(teacher_batch)
+
+        return teacher_batch
+
+    def _write_teacher_states_to_cache(
+        self, teacher_batch: Dict[str, torch.Tensor]
+    ) -> None:
+        """Write teacher states to cache for write-through mode.
+
+        Args:
+            teacher_batch: Batch dictionary with teacher states
+        """
+        if not hasattr(self, "_cache_write_idx"):
+            self._cache_write_idx = 0
+
+        num_samples = teacher_batch["input_ids"].shape[0]
+        num_shards = 1
+
+        sample_data = {
+            "input_ids": teacher_batch["input_ids"].cpu(),
+            "attention_mask": teacher_batch.get(
+                "attention_mask", torch.ones_like(teacher_batch["input_ids"])
+            ).cpu(),
+            "h_start": teacher_batch["h_start"].cpu(),
+            "velocity_target": teacher_batch["velocity_target"].cpu(),
+        }
+
+        if "h_target" in teacher_batch:
+            sample_data["h_target"] = teacher_batch["h_target"].cpu()
+        if "teacher_logits" in teacher_batch:
+            sample_data["teacher_logits"] = teacher_batch["teacher_logits"].cpu()
+
+        self._cache_writer.write_shard(
+            sample_data=sample_data,
+            shard_idx=self._cache_write_idx,
+            num_shards=num_shards,
+        )
+        self._cache_write_idx += 1
+
+        logger.debug(f"Wrote teacher states to cache (shard {self._cache_write_idx})")
 
     def _create_optimizer(self) -> torch.optim.Optimizer:
         """Create optimizer from config."""
@@ -392,40 +448,37 @@ class Trainer:
         # Sample T if not provided
         if T is None:
             T = self.sample_T()
-        try:
-            self._compute_teacher_logits_cpu(batch)
-            batch = self._prepare_batch(batch)
 
-            # Sample continuous time if enabled
-            sample_continuous_time = self.train_loop_config.get(
-                "sample_continuous_time", False
+        # Move batch to device
+        batch = {
+            k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+            for k, v in batch.items()
+        }
+
+        # For online modes, extract teacher states if not already in batch
+        if self.teacher_state_mode.requires_live_teacher():
+            batch = self._maybe_extract_teacher_states(batch)
+
+        # Sample continuous time if enabled
+        sample_continuous_time = self.train_loop_config.get(
+            "sample_continuous_time", False
+        )
+        if sample_continuous_time:
+            batch_size = batch["input_ids"].shape[0]
+            t = self.sample_continuous_time(batch_size, self.device)
+            logger.debug(f"Sampled continuous time t: {t}")
+        else:
+            t = None
+
+        # Forward pass with optional AMP
+        if self.use_amp:
+            # Use torch.amp.autocast for newer PyTorch, fallback to torch.cuda.amp.autocast
+            autocast_context = (
+                torch.amp.autocast("cuda", dtype=self.amp_dtype)
+                if hasattr(torch, "amp")
+                else torch.cuda.amp.autocast(dtype=self.amp_dtype)
             )
-            if sample_continuous_time:
-                batch_size = batch["input_ids"].shape[0]
-                t = self.sample_continuous_time(batch_size, self.device)
-                logger.debug(f"Sampled continuous time t: {t}")
-            else:
-                t = None
-
-            # Forward pass with optional AMP
-            autocast_context = self._autocast_context()
-            if autocast_context is not None:
-                with autocast_context:
-                    student_outputs = self.model(
-                        input_ids=batch["input_ids"],
-                        attention_mask=batch.get("attention_mask"),
-                        num_steps=T,
-                        return_dict=True,
-                    )
-
-                    total_loss, loss_metrics = self.loss_fn(
-                        student_outputs=student_outputs,
-                        teacher_batch=batch,
-                        T=T,
-                        model=self.model,
-                        t=t,
-                    )
-            else:
+            with autocast_context:
                 student_outputs = self.model(
                     input_ids=batch["input_ids"],
                     attention_mask=batch.get("attention_mask"),
@@ -433,6 +486,7 @@ class Trainer:
                     return_dict=True,
                 )
 
+                # Compute loss
                 total_loss, loss_metrics = self.loss_fn(
                     student_outputs=student_outputs,
                     teacher_batch=batch,
@@ -440,60 +494,76 @@ class Trainer:
                     model=self.model,
                     t=t,
                 )
+        else:
+            student_outputs = self.model(
+                input_ids=batch["input_ids"],
+                attention_mask=batch.get("attention_mask"),
+                num_steps=T,
+                return_dict=True,
+            )
 
-            # Scale loss for gradient accumulation
-            if self.accumulate_grad_batches > 1:
-                total_loss = total_loss / self.accumulate_grad_batches
+            # Compute loss
+            total_loss, loss_metrics = self.loss_fn(
+                student_outputs=student_outputs,
+                teacher_batch=batch,
+                T=T,
+                model=self.model,
+                t=t,
+            )
 
-            # Backward pass
-            if self.use_amp:
-                self.scaler.scale(total_loss).backward()
-            else:
-                total_loss.backward()
+        # Scale loss for gradient accumulation
+        if self.accumulate_grad_batches > 1:
+            total_loss = total_loss / self.accumulate_grad_batches
 
-            self.accumulation_step += 1
+        # Backward pass
+        if self.use_amp:
+            self.scaler.scale(total_loss).backward()
+        else:
+            total_loss.backward()
 
-            # Optimizer step if accumulation is complete
-            if self.accumulation_step >= self.accumulate_grad_batches:
-                if self.grad_clip_norm > 0:
-                    if self.use_amp:
-                        self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(),
-                        self.grad_clip_norm,
-                    )
+        self.accumulation_step += 1
 
+        # Optimizer step if accumulation is complete
+        if self.accumulation_step >= self.accumulate_grad_batches:
+            if self.grad_clip_norm > 0:
                 if self.use_amp:
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
-                else:
-                    self.optimizer.step()
+                    self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.grad_clip_norm,
+                )
 
-                self.optimizer.zero_grad()
-                self.accumulation_step = 0
-                self.global_step += 1
+            if self.use_amp:
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                self.optimizer.step()
 
-                if self.scheduler is not None:
-                    self.scheduler.step()
+            self.optimizer.zero_grad()
+            self.accumulation_step = 0
+            self.global_step += 1
 
-            metrics = {
-                "loss": loss_metrics.get("total_loss", total_loss.item()),
-                "velocity_loss": loss_metrics.get("velocity_loss", 0.0),
-                "endpoint_loss": loss_metrics.get("endpoint_loss", 0.0),
-                "trajectory_loss": loss_metrics.get("trajectory_loss", 0.0),
-                "kl_loss": loss_metrics.get("kl_loss", 0.0),
-                "ce_loss": loss_metrics.get("ce_loss", 0.0),
-                "T": T,
-                "lr": self.optimizer.param_groups[0]["lr"],
-            }
+            # Scheduler step
+            if self.scheduler is not None:
+                self.scheduler.step()
 
-            if sample_continuous_time and t is not None:
-                metrics["t_mean"] = t.mean().item()
-                metrics["t_std"] = t.std().item()
+        # Prepare metrics
+        metrics = {
+            "loss": loss_metrics.get("total_loss", total_loss.item()),
+            "velocity_loss": loss_metrics.get("velocity_loss", 0.0),
+            "endpoint_loss": loss_metrics.get("endpoint_loss", 0.0),
+            "trajectory_loss": loss_metrics.get("trajectory_loss", 0.0),
+            "kl_loss": loss_metrics.get("kl_loss", 0.0),
+            "ce_loss": loss_metrics.get("ce_loss", 0.0),
+            "T": T,
+            "lr": self.optimizer.param_groups[0]["lr"],
+        }
 
-            return metrics
-        finally:
-            self._clear_cached_teacher_logits()
+        if sample_continuous_time and t is not None:
+            metrics["t_mean"] = t.mean().item()
+            metrics["t_std"] = t.std().item()
+
+        return metrics
 
     def val_step(
         self, batch: Dict[str, torch.Tensor], T: Optional[int] = None
@@ -512,38 +582,37 @@ class Trainer:
         # Sample T if not provided
         if T is None:
             T = self.sample_T()
-        try:
-            self._compute_teacher_logits_cpu(batch)
-            batch = self._prepare_batch(batch)
 
-            sample_continuous_time = self.train_loop_config.get(
-                "sample_continuous_time", False
-            )
-            if sample_continuous_time:
-                batch_size = batch["input_ids"].shape[0]
-                t = self.sample_continuous_time(batch_size, self.device)
-            else:
-                t = None
+        # Move batch to device
+        batch = {
+            k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+            for k, v in batch.items()
+        }
 
-            with torch.no_grad():
-                autocast_context = self._autocast_context()
-                if autocast_context is not None:
-                    with autocast_context:
-                        student_outputs = self.model(
-                            input_ids=batch["input_ids"],
-                            attention_mask=batch.get("attention_mask"),
-                            num_steps=T,
-                            return_dict=True,
-                        )
+        # For online modes, extract teacher states if not already in batch
+        if self.teacher_state_mode.requires_live_teacher():
+            batch = self._maybe_extract_teacher_states(batch)
 
-                        total_loss, loss_metrics = self.loss_fn(
-                            student_outputs=student_outputs,
-                            teacher_batch=batch,
-                            T=T,
-                            model=self.model,
-                            t=t,
-                        )
-                else:
+        # Sample continuous time if enabled
+        sample_continuous_time = self.train_loop_config.get(
+            "sample_continuous_time", False
+        )
+        if sample_continuous_time:
+            batch_size = batch["input_ids"].shape[0]
+            t = self.sample_continuous_time(batch_size, self.device)
+        else:
+            t = None
+
+        with torch.no_grad():
+            # Forward pass with optional AMP
+            if self.use_amp:
+                # Use torch.amp.autocast for newer PyTorch, fallback to torch.cuda.amp.autocast
+                autocast_context = (
+                    torch.amp.autocast("cuda", dtype=self.amp_dtype)
+                    if hasattr(torch, "amp")
+                    else torch.cuda.amp.autocast(dtype=self.amp_dtype)
+                )
+                with autocast_context:
                     student_outputs = self.model(
                         input_ids=batch["input_ids"],
                         attention_mask=batch.get("attention_mask"),
@@ -551,6 +620,7 @@ class Trainer:
                         return_dict=True,
                     )
 
+                    # Compute loss
                     total_loss, loss_metrics = self.loss_fn(
                         student_outputs=student_outputs,
                         teacher_batch=batch,
@@ -558,20 +628,35 @@ class Trainer:
                         model=self.model,
                         t=t,
                     )
+            else:
+                student_outputs = self.model(
+                    input_ids=batch["input_ids"],
+                    attention_mask=batch.get("attention_mask"),
+                    num_steps=T,
+                    return_dict=True,
+                )
 
-            metrics = {
-                "loss": loss_metrics.get("total_loss", total_loss.item()),
-                "velocity_loss": loss_metrics.get("velocity_loss", 0.0),
-                "endpoint_loss": loss_metrics.get("endpoint_loss", 0.0),
-                "trajectory_loss": loss_metrics.get("trajectory_loss", 0.0),
-                "kl_loss": loss_metrics.get("kl_loss", 0.0),
-                "ce_loss": loss_metrics.get("ce_loss", 0.0),
-                "T": T,
-            }
+                # Compute loss
+                total_loss, loss_metrics = self.loss_fn(
+                    student_outputs=student_outputs,
+                    teacher_batch=batch,
+                    T=T,
+                    model=self.model,
+                    t=t,
+                )
 
-            return metrics
-        finally:
-            self._clear_cached_teacher_logits()
+        # Prepare metrics
+        metrics = {
+            "loss": loss_metrics.get("total_loss", total_loss.item()),
+            "velocity_loss": loss_metrics.get("velocity_loss", 0.0),
+            "endpoint_loss": loss_metrics.get("endpoint_loss", 0.0),
+            "trajectory_loss": loss_metrics.get("trajectory_loss", 0.0),
+            "kl_loss": loss_metrics.get("kl_loss", 0.0),
+            "ce_loss": loss_metrics.get("ce_loss", 0.0),
+            "T": T,
+        }
+
+        return metrics
 
     def validate(
         self, dataloader: Optional[Any] = None, max_batches: Optional[int] = None
@@ -776,11 +861,6 @@ class Trainer:
                 if self.global_step % self.log_every_n_steps == 0:
                     log_str = f"Step {self.global_step}: "
                     log_str += f"loss={metrics['loss']:.4f}, "
-                    log_str += (
-                        f"velocity_loss={metrics.get('velocity_loss', 0.0):.4f}, "
-                    )
-                    log_str += f"kl_loss={metrics.get('kl_loss', 0.0):.4f}, "
-                    log_str += f"ce_loss={metrics.get('ce_loss', 0.0):.4f}, "
                     log_str += f"T={metrics['T']}, "
                     log_str += f"lr={metrics['lr']:.6f}"
                     logger.info(log_str)

@@ -1,9 +1,9 @@
-experiment_name: "v0_qwen_mixed_corpus_midblock_plus_kl_loss"
+experiment_name: "v0_qwen_mixed_corpus_midblock_plus_kl_loss_long_context"
 
 teacher_cache:
   enabled: true
   cache_dir: "./cache/mixed_qwen_boundary_states"
-  store_logits: false
+  store_logits: true
   store_hidden_states: true
   overwrite: false
 
@@ -12,8 +12,8 @@ teacher_state:
 
 data:
   loader: "mixture"
-  seq_len: 128
-  batch_size: 10
+  seq_len: 512
+  batch_size: 6
   num_workers: 4
   pin_memory: true
   persistent_workers: true
@@ -147,17 +147,17 @@ scheduler:
 
 train_loop:
   precision: "bf16-mixed"
-  max_epochs: 3
+  max_epochs: 5
   accumulate_grad_batches: 4
   log_every_n_steps: 10
-  val_check_interval: 250
+  val_check_interval: 500
   gradient_checkpointing: false
   sample_continuous_time: true
-  checkpoint_dir: "./outputs/v0_qwen_mixed_corpus_midblock_plus_kl_loss/checkpoints"
+  checkpoint_dir: "./outputs/v0_qwen_mixed_corpus_midblock_plus_kl_loss_long_context/checkpoints"
   resume_from_checkpoint: null
 
 logging:
-  log_dir: "./outputs/v0_qwen_mixed_corpus_midblock_plus_kl_loss/logs"
+  log_dir: "./outputs/v0_qwen_mixed_corpus_midblock_plus_kl_loss_long_context/logs"
   save_top_k: 2
   monitor: "val/total_loss"
   mode: "min"
