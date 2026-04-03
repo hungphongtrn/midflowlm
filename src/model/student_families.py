@@ -1,11 +1,12 @@
-"""Trainable student model families for distillation.
+"""Student model families for midflowlm v0.1 experiments.
 
-This module implements the trainable student families for Phase 1:
-- A1: Single Shared Block (T=1)
-- A2: Shared Recurrent Residual (iterative, no step conditioning)
-- A3: FlowMidblock (with step conditioning)
+This module implements the trainable architecture families:
+- A1: One-shot residual MLP projector (baseline)
+- A2: Multi-step with step conditioning (future)
+- A3: Flow-matching inspired (future)
 
-All families follow the same API for easy comparison and integration.
+Per v0.1 spec, each family targets a different computation budget and
+assumption about iterative refinement necessity.
 """
 
 import torch
@@ -14,15 +15,81 @@ import torch.nn.functional as F
 import math
 from typing import Optional, List
 
+__all__ = ["OneShotProjector", "SharedRecurrentResidual"]
 
-__all__ = [
-    "OneShotProjector",
-    "SharedRecurrentResidual",
-]
+
+class OneShotProjector(nn.Module):
+    """A1: One-shot residual MLP projector.
+
+    The simplest architecture family - a one-shot residual MLP that transforms
+    h_start to h_end in a single forward pass. This serves as a baseline to verify
+    if iterative refinement is actually beneficial.
+
+    Per v0.1 spec:
+        h_end_hat = h_start + g_theta(h_start)
+
+    where g_theta is a simple two-layer MLP with GELU activation.
+
+    Args:
+        hidden_size: Dimension of hidden states
+        mlp_ratio: Ratio of MLP intermediate size to hidden size
+        dropout: Dropout probability
+    """
+
+    def __init__(
+        self,
+        hidden_size: int = 896,
+        mlp_ratio: float = 4.0,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.mlp_ratio = mlp_ratio
+
+        intermediate_size = int(hidden_size * mlp_ratio)
+
+        # Simple two-layer MLP: hidden -> intermediate -> hidden
+        self.fc1 = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.fc2 = nn.Linear(intermediate_size, hidden_size, bias=False)
+        self.dropout = nn.Dropout(dropout)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize weights."""
+
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+        self.apply(_basic_init)
+
+    def forward(
+        self, h_start: torch.Tensor, num_steps: Optional[int] = None
+    ) -> torch.Tensor:
+        """Forward pass through residual MLP.
+
+        Args:
+            h_start: Starting hidden states [batch, seq, hidden]
+            num_steps: Ignored (A1 is one-shot only, for API compatibility)
+
+        Returns:
+            Transformed hidden states [batch, seq, hidden]
+        """
+        # MLP transformation: g_theta(h_start)
+        hidden = self.fc1(h_start)
+        hidden = F.gelu(hidden)
+        hidden = self.fc2(hidden)
+        hidden = self.dropout(hidden)  # Single dropout after transformation
+
+        # Residual connection: h_start + g_theta(h_start)
+        h_end_hat = h_start + hidden
+
+        return h_end_hat
 
 
 # =============================================================================
-# Shared Components (mirroring baselines.py patterns)
+# Supporting Components for A2
 # =============================================================================
 
 
@@ -161,6 +228,7 @@ class RefinerBlock(nn.Module):
             hidden_size=hidden_size,
             num_heads=num_heads,
             dropout=dropout,
+            qkv_bias=False,
         )
         self.norm2 = RMSNorm(hidden_size)
         intermediate_size = int(hidden_size * mlp_ratio)
@@ -190,92 +258,20 @@ class RefinerBlock(nn.Module):
         return hidden_states
 
 
-# =============================================================================
-# Student Family A1: One-Shot Projector
-# =============================================================================
-
-
-class OneShotProjector(nn.Module):
-    """A1: Single shared block applied once (T=1).
-
-    This is the simplest trainable family that applies a single refiner block
-    once to transform h_start to h_end. It tests whether a single pass through
-    attention + MLP is sufficient without iteration.
-
-    Args:
-        hidden_size: Dimension of hidden states
-        num_heads: Number of attention heads
-        mlp_ratio: Ratio of MLP intermediate size to hidden size
-        dropout: Dropout probability
-    """
-
-    def __init__(
-        self,
-        hidden_size: int = 896,
-        num_heads: int = 8,
-        mlp_ratio: float = 4.0,
-        dropout: float = 0.0,
-    ):
-        super().__init__()
-        self.hidden_size = hidden_size
-
-        # Single block applied once
-        self.block = RefinerBlock(
-            hidden_size=hidden_size,
-            num_heads=num_heads,
-            mlp_ratio=mlp_ratio,
-            dropout=dropout,
-        )
-
-        # Output projection
-        self.output_norm = RMSNorm(hidden_size)
-
-        self._init_weights()
-
-    def _init_weights(self):
-        """Initialize weights."""
-
-        def _basic_init(module):
-            if isinstance(module, nn.Linear):
-                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-                if module.bias is not None:
-                    torch.nn.init.zeros_(module.bias)
-
-        self.apply(_basic_init)
-
-    def forward(
-        self,
-        h_start: torch.Tensor,
-        num_steps: int = 1,
-        attention_mask: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """Forward pass with single refinement.
-
-        Args:
-            h_start: Starting hidden states [batch_size, seq_len, hidden_size]
-            num_steps: Ignored for A1 (always 1)
-            attention_mask: Optional attention mask [batch_size, seq_len]
-
-        Returns:
-            Refined hidden states [batch_size, seq_len, hidden_size]
-        """
-        h = self.block(h_start, attention_mask)
-        h = self.output_norm(h)
-        return h
-
-
-# =============================================================================
-# Student Family A2: Shared Recurrent Residual
-# =============================================================================
-
-
 class SharedRecurrentResidual(nn.Module):
-    """A2: Shared recurrent residual trainable family.
+    """A2: Multi-step shared recurrent residual refinement.
 
-    This model applies a single shared refiner block (attention + MLP) iteratively
-    for T steps, without step conditioning. This tests whether simple repeated
-    application of the same block is sufficient, or if minFM-inspired step
-    conditioning (A3) is needed.
+    This architecture implements iterative latent refinement using a single
+    shared transformer block applied multiple times. Unlike A1 which does
+    one-shot transformation, A2 allows the model to refine its representation
+    through multiple steps using the same parameters.
+
+    Per v0.1 spec:
+        h_{t+1} = h_t + f_theta(h_t)
+
+    where f_theta is a shared transformer block (attention + SwiGLU MLP)
+    applied for T steps. The block is shared across all steps, enabling
+    parameter-efficient iterative refinement.
 
     Args:
         hidden_size: Dimension of hidden states
@@ -297,7 +293,7 @@ class SharedRecurrentResidual(nn.Module):
         self.hidden_size = hidden_size
         self.max_steps_T = max_steps_T
 
-        # Single shared block (no step conditioning)
+        # Single shared refiner block
         self.block = RefinerBlock(
             hidden_size=hidden_size,
             num_heads=num_heads,
@@ -305,19 +301,17 @@ class SharedRecurrentResidual(nn.Module):
             dropout=dropout,
         )
 
-        # Output projection
+        # Output projection with normalization
         self.output_norm = RMSNorm(hidden_size)
 
         self._init_weights()
 
     def _init_weights(self):
-        """Initialize weights."""
+        """Initialize weights using standard normal initialization."""
 
         def _basic_init(module):
             if isinstance(module, nn.Linear):
                 torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-                if module.bias is not None:
-                    torch.nn.init.zeros_(module.bias)
 
         self.apply(_basic_init)
 
@@ -327,19 +321,19 @@ class SharedRecurrentResidual(nn.Module):
         num_steps: int = 8,
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Forward pass with iterative refinement.
+        """Forward pass with iterative shared-block refinement.
 
         Args:
-            h_start: Starting hidden states [batch_size, seq_len, hidden_size]
-            num_steps: Number of refinement steps
-            attention_mask: Optional attention mask [batch_size, seq_len]
+            h_start: Starting hidden states [batch, seq, hidden]
+            num_steps: Number of refinement steps (default: max_steps_T)
+            attention_mask: Optional attention mask [batch, seq]
 
         Returns:
-            Refined hidden states [batch_size, seq_len, hidden_size]
+            Refined hidden states [batch, seq, hidden]
         """
         h = h_start
 
-        # Run the same block for num_steps iterations (no step conditioning)
+        # Run shared block for num_steps iterations
         for _ in range(num_steps):
             h = self.block(h, attention_mask)
 
@@ -352,12 +346,12 @@ class SharedRecurrentResidual(nn.Module):
         num_steps: int = 8,
         attention_mask: Optional[torch.Tensor] = None,
     ) -> List[torch.Tensor]:
-        """Forward pass returning full trajectory.
+        """Forward pass returning full trajectory for analysis.
 
         Args:
-            h_start: Starting hidden states [batch_size, seq_len, hidden_size]
+            h_start: Starting hidden states [batch, seq, hidden]
             num_steps: Number of refinement steps
-            attention_mask: Optional attention mask [batch_size, seq_len]
+            attention_mask: Optional attention mask [batch, seq]
 
         Returns:
             List of hidden states at each step (including h_start)
@@ -368,5 +362,8 @@ class SharedRecurrentResidual(nn.Module):
         for _ in range(num_steps):
             h = self.block(h, attention_mask)
             trajectory.append(h)
+
+        # Apply output norm to final state only
+        trajectory[-1] = self.output_norm(trajectory[-1])
 
         return trajectory

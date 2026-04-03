@@ -1,6 +1,6 @@
 """Mixed-corpus dataset loading and tokenization utilities."""
 
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Tuple
 import torch
 from torch.utils.data import DataLoader
 from datasets import load_dataset, DatasetDict, concatenate_datasets
@@ -149,6 +149,119 @@ def build_mixture_split(
         datasets.append(ds)
 
     return concatenate_datasets(datasets)
+
+
+def build_mixture_split_with_stats(
+    config: Any,
+    split: str,
+    tokenizer: PreTrainedTokenizer,
+    seq_len: int = None,
+) -> Tuple[Any, Dict]:
+    """Build mixture split with truncation statistics.
+
+    Args:
+        config: Configuration object with data.mixture_components
+        split: Which split to build ('train' or 'val')
+        tokenizer: Tokenizer for text formatting
+        seq_len: Sequence length for truncation detection (defaults to config.data.seq_len)
+
+    Returns:
+        tuple: (dataset, stats_dict) where stats_dict contains per-component
+               truncation statistics
+    """
+    # Build dataset
+    dataset = build_mixture_split(config, split, tokenizer)
+
+    # Get sequence length from config if not provided
+    if seq_len is None:
+        seq_len = config.data.seq_len
+
+    # Collect stats per component
+    stats = {"by_component": {}}
+
+    for component in config.data.mixture_components:
+        name = component["name"]
+
+        # Load component dataset to track truncation stats
+        ds = load_component_dataset(component, split)
+        ds = ds.shuffle(seed=config.data.shuffle_seed)
+        limit = component[f"{split}_samples"]
+        ds = ds.select(range(min(limit, len(ds))))
+
+        # Track truncation statistics
+        total_sequences = len(ds)
+        truncated_sequences = 0
+        original_lengths = []
+
+        for i in range(total_sequences):
+            text = ds[i].get("text", "")
+            # Get original length by tokenizing without truncation
+            full_tokens = tokenizer(text, truncation=False, add_special_tokens=True)
+            original_len = len(full_tokens["input_ids"])
+            original_lengths.append(original_len)
+
+            # Check if truncation would occur
+            if original_len > seq_len:
+                truncated_sequences += 1
+
+        # Calculate statistics
+        mean_original_length = (
+            sum(original_lengths) / len(original_lengths) if original_lengths else 0
+        )
+        truncation_rate = (
+            truncated_sequences / total_sequences if total_sequences > 0 else 0.0
+        )
+
+        stats["by_component"][name] = {
+            "total_sequences": total_sequences,
+            "truncated_sequences": truncated_sequences,
+            "truncation_rate": truncation_rate,
+            "mean_original_length": mean_original_length,
+        }
+
+    return dataset, stats
+
+
+def get_truncation_stats(stats: Dict) -> Dict:
+    """Get formatted truncation statistics summary.
+
+    Args:
+        stats: Stats dict from build_mixture_split_with_stats
+
+    Returns:
+        Dict with formatted summary including overall and per-component stats
+    """
+    summary = {
+        "by_component": {},
+        "overall_truncation_rate": 0.0,
+        "per_component": {},
+    }
+
+    if "by_component" not in stats:
+        return summary
+
+    total_sequences = 0
+    total_truncated = 0
+
+    for name, component_stats in stats["by_component"].items():
+        # Copy per-component stats
+        summary["by_component"][name] = component_stats.copy()
+
+        # Add to summary format
+        summary["per_component"][name] = {
+            "truncation_rate": component_stats.get("truncation_rate", 0.0),
+            "mean_original_length": component_stats.get("mean_original_length", 0),
+        }
+
+        # Accumulate totals for overall rate
+        total_sequences += component_stats.get("total_sequences", 0)
+        total_truncated += component_stats.get("truncated_sequences", 0)
+
+    # Compute overall truncation rate
+    if total_sequences > 0:
+        summary["overall_truncation_rate"] = total_truncated / total_sequences
+
+    return summary
 
 
 def tokenize_function(

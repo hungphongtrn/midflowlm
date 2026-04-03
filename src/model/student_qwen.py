@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from src.model.midblock import IterativeMidblock
 from src.model.ode import MidblockVectorField, build_solver_options
+from src.model.student_interface import StudentFamilyInterface
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,7 @@ class FrozenQwenStudent(nn.Module):
         device: str = "cpu",
         dtype: torch.dtype = torch.float32,
         bypass_mode: bool = False,
+        family: str = "flow_midblock",
     ):
         super().__init__()
         self.model_name = model_name
@@ -128,6 +130,7 @@ class FrozenQwenStudent(nn.Module):
         self.device = device
         self.dtype = dtype
         self.bypass_mode = bypass_mode
+        self.family = family
         self.span_depth = end_layer - start_layer + 1
 
         # Load model config
@@ -208,9 +211,39 @@ class FrozenQwenStudent(nn.Module):
                 use_residual=True,
                 step_encoding_mode="combined",
             ).to(device)
+
+            # Create appropriate family model and interface
+            if family == "one_shot_projector":
+                from .student_families import OneShotProjector
+
+                self.family_model = OneShotProjector(hidden_size=hidden_size).to(device)
+                self.family_interface = StudentFamilyInterface(
+                    self.family_model, family_type=family
+                )
+            elif family == "shared_recurrent_residual":
+                from .student_families import SharedRecurrentResidual
+
+                self.family_model = SharedRecurrentResidual(
+                    hidden_size=hidden_size,
+                    max_steps_T=max_steps_T,
+                    num_heads=num_heads,
+                ).to(device)
+                self.family_interface = StudentFamilyInterface(
+                    self.family_model, family_type=family
+                )
+            elif family == "flow_midblock":
+                # Use existing midblock (already created above)
+                self.family_model = self.midblock
+                self.family_interface = (
+                    None  # flow_midblock uses direct ODE integration
+                )
+            else:
+                raise ValueError(f"Unknown family: {family}")
         else:
             # In bypass mode, no midblock
             self.midblock = None
+            self.family_model = None
+            self.family_interface = None
             # Still freeze parameters
             for param in self.model.parameters():
                 param.requires_grad = False
@@ -340,62 +373,24 @@ class FrozenQwenStudent(nn.Module):
             # Extract h_start using model's forward (handles all the complexity)
             h_start = self._extract_h_start(input_ids, attention_mask)
 
-            # Create vector field wrapper for ODE integration
-            vector_field = MidblockVectorField(
-                midblock=self.midblock,
-                h_start=h_start,
-                attention_mask=attention_mask,
-            )
-
-            # Build solver options based on method and num_steps
-            solver_options = build_solver_options(solver_method, num_steps)
-
-            # Import torchdiffeq for ODE integration
-            try:
-                from torchdiffeq import odeint
-            except ImportError:
-                raise ImportError(
-                    "torchdiffeq is required for ODE integration. "
-                    "Install with: pip install torchdiffeq"
+            # Handle different families
+            if self.family == "flow_midblock":
+                # Use ODE integration for flow-based midblock
+                h_mid, trajectory_stacked = self._forward_ode(
+                    h_start, num_steps, solver_method, attention_mask, return_dict
                 )
-
-            # Integration time points: start at 0, end at 1
-            # Using [0, 1] normalizes inference time regardless of num_steps
-            t = torch.tensor([0.0, 1.0], device=h_start.device, dtype=h_start.dtype)
-
-            # Run ODE integration
-            # odeint returns [time_points, batch, seq, hidden]
-            solution = odeint(
-                vector_field,
-                h_start,
-                t,
-                method=solver_method,
-                options=solver_options,
-            )
-
-            # Extract final state at t=1
-            h_mid = solution[-1]
-
-            # For trajectory tracking, interpolate at each step if return_dict
-            if return_dict:
-                # Create time points for each step to capture trajectory
-                t_trajectory = torch.linspace(
-                    0, 1, num_steps + 1, device=h_start.device
+            elif self.family in ["one_shot_projector", "shared_recurrent_residual"]:
+                # Use family interface for A1/A2 families
+                refinement_result = self.family_interface.forward_refinement(
+                    h_start=h_start,
+                    num_steps=num_steps,
+                    attention_mask=attention_mask,
+                    return_trajectory=return_dict,
                 )
-                trajectory_solution = odeint(
-                    vector_field,
-                    h_start,
-                    t_trajectory,
-                    method=solver_method,
-                    options=solver_options,
-                )
-                # Skip the initial state at t=0, take remaining steps
-                # Shape: [num_steps+1, batch, seq, hidden] -> [num_steps, batch, seq, hidden]
-                trajectory = trajectory_solution[1:]
-                # Transpose to [batch, seq, num_steps, hidden]
-                trajectory_stacked = trajectory.transpose(0, 1).transpose(1, 2)
+                h_mid = refinement_result["endpoint_hidden"]
+                trajectory_stacked = refinement_result.get("trajectory_hidden")
             else:
-                trajectory_stacked = None
+                raise ValueError(f"Unknown family: {self.family}")
 
             # Run upper layers from h_mid
             logits = self._continue_from_hidden_state(h_mid, attention_mask)
@@ -408,6 +403,78 @@ class FrozenQwenStudent(nn.Module):
                 )
             else:
                 return logits
+
+    def _forward_ode(
+        self,
+        h_start: torch.Tensor,
+        num_steps: int,
+        solver_method: str,
+        attention_mask: Optional[torch.Tensor] = None,
+        return_trajectory: bool = False,
+    ):
+        """Forward pass using ODE integration for flow_midblock family.
+
+        Args:
+            h_start: Starting hidden states
+            num_steps: Number of refinement steps
+            solver_method: ODE solver method
+            attention_mask: Optional attention mask
+            return_trajectory: Whether to return trajectory
+
+        Returns:
+            Tuple of (endpoint_hidden, trajectory_hidden or None)
+        """
+        # Create vector field wrapper for ODE integration
+        vector_field = MidblockVectorField(
+            midblock=self.midblock,
+            h_start=h_start,
+            attention_mask=attention_mask,
+        )
+
+        # Build solver options based on method and num_steps
+        solver_options = build_solver_options(solver_method, num_steps)
+
+        # Import torchdiffeq for ODE integration
+        try:
+            from torchdiffeq import odeint
+        except ImportError:
+            raise ImportError(
+                "torchdiffeq is required for ODE integration. "
+                "Install with: pip install torchdiffeq"
+            )
+
+        # Integration time points: start at 0, end at 1
+        t = torch.tensor([0.0, 1.0], device=h_start.device, dtype=h_start.dtype)
+
+        # Run ODE integration
+        solution = odeint(
+            vector_field,
+            h_start,
+            t,
+            method=solver_method,
+            options=solver_options,
+        )
+
+        # Extract final state at t=1
+        h_mid = solution[-1]
+
+        trajectory_stacked = None
+        if return_trajectory:
+            # Create time points for each step to capture trajectory
+            t_trajectory = torch.linspace(0, 1, num_steps + 1, device=h_start.device)
+            trajectory_solution = odeint(
+                vector_field,
+                h_start,
+                t_trajectory,
+                method=solver_method,
+                options=solver_options,
+            )
+            # Skip the initial state at t=0, take remaining steps
+            trajectory = trajectory_solution[1:]
+            # Transpose to [batch, seq, num_steps, hidden]
+            trajectory_stacked = trajectory.transpose(0, 1).transpose(1, 2)
+
+        return h_mid, trajectory_stacked
 
     def _continue_from_hidden_state(
         self,
@@ -516,30 +583,33 @@ class FrozenQwenStudent(nn.Module):
             param.requires_grad = False
 
     def unfreeze_midblock(self):
-        """Unfreeze only the midblock parameters."""
-        if self.midblock is not None:
-            for param in self.midblock.parameters():
+        """Unfreeze only the trainable family model parameters."""
+        if self.family_model is not None:
+            for param in self.family_model.parameters():
                 param.requires_grad = True
 
     def save_midblock(self, path: str):
-        """Save only the midblock state dict."""
-        if self.midblock is not None:
-            torch.save(self.midblock.state_dict(), path)
+        """Save only the trainable family model state dict."""
+        if self.family_model is not None:
+            torch.save(self.family_model.state_dict(), path)
         else:
-            raise ValueError("No midblock to save (bypass mode)")
+            raise ValueError("No family model to save (bypass mode)")
 
     def load_midblock(self, path: str):
-        """Load midblock state dict."""
-        if self.midblock is not None:
+        """Load family model state dict."""
+        if self.family_model is not None:
             state_dict = torch.load(path, map_location=self.device, weights_only=True)
-            self.midblock.load_state_dict(state_dict)
+            self.family_model.load_state_dict(state_dict)
         else:
-            raise ValueError("No midblock to load into (bypass mode)")
+            raise ValueError("No family model to load into (bypass mode)")
 
     def extract_teacher_targets(
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
+        need_teacher_logits: bool = True,
+        need_velocity: bool = True,
+        need_trajectory_anchors: bool = False,
     ) -> Dict[str, torch.Tensor]:
         """
         Extract teacher targets from frozen Qwen using one forward pass.
@@ -551,35 +621,65 @@ class FrozenQwenStudent(nn.Module):
         Args:
             input_ids: Input token IDs [batch_size, seq_len]
             attention_mask: Attention mask [batch_size, seq_len]
+            need_teacher_logits: If False, skip computing teacher logits (saves memory when KL loss disabled)
+            need_velocity: If False, skip computing velocity_target (saves compute when velocity loss disabled)
+            need_trajectory_anchors: If True, extract h8,h9,h10,h11 for v0.1 trajectory loss
 
         Returns:
-            Dictionary containing:
+            Dictionary containing (depending on flags):
                 - h_start: Hidden state at start_layer (input to layer start_layer)
                 - h_target: Hidden state after end_layer (output of layer end_layer)
-                - velocity_target: h_target - h_start (flow matching velocity)
-                - teacher_logits: Final logits from the full teacher model
+                - velocity_target: h_target - h_start (flow matching velocity, if need_velocity=True)
+                - teacher_logits: Final logits from the full teacher model (if need_teacher_logits=True)
+                - trajectory_anchors: Dict with h8,h9,h10,h11 (if need_trajectory_anchors=True)
         """
         with torch.no_grad():
-            outputs = self.model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-                return_dict=True,
-            )
+            # Build forward kwargs based on what we need
+            forward_kwargs = {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "output_hidden_states": True,
+                "return_dict": True,
+            }
+
+            # Only compute logits if needed (saves memory)
+            if not need_teacher_logits:
+                forward_kwargs["output_logits"] = False
+
+            outputs = self.model(**forward_kwargs)
 
             hidden_states = outputs.hidden_states
 
             h_start = hidden_states[self.start_layer]
             h_target = hidden_states[self.end_layer + 1]
-            velocity_target = h_target - h_start
-            teacher_logits = outputs.logits
 
-        return {
-            "h_start": h_start,
-            "h_target": h_target,
-            "velocity_target": velocity_target,
-            "teacher_logits": teacher_logits,
-        }
+            result = {
+                "h_start": h_start,
+                "h_target": h_target,
+            }
+
+            # Compute velocity only if needed
+            if need_velocity:
+                velocity_target = h_target - h_start
+                result["velocity_target"] = velocity_target
+
+            # Add teacher logits only if needed
+            if need_teacher_logits:
+                result["teacher_logits"] = outputs.logits
+
+            # Extract trajectory anchors if needed (for v0.1 trajectory loss)
+            if need_trajectory_anchors:
+                # Extract h8, h9, h10, h11 from hidden_states[8:12]
+                # hidden_states[0] is embeddings, hidden_states[i] is output of layer i-1
+                # So h8 = hidden_states[8], h11 = hidden_states[11]
+                result["trajectory_anchors"] = {
+                    "h8": hidden_states[8],
+                    "h9": hidden_states[9],
+                    "h10": hidden_states[10],
+                    "h11": hidden_states[11],
+                }
+
+        return result
 
     def gradient_checkpointing_enable(self, gradient_checkpointing_func=None):
         """Enable gradient checkpointing to reduce memory usage.

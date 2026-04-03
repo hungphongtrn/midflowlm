@@ -1,6 +1,20 @@
 experiment_name: "v0_qwen_iterative_midblock_smoke"
 seed: 1337
 
+# Model configuration
+model:
+  name: "Qwen/Qwen3.5-0.8B"
+  revision: null
+  max_steps_T: 8
+
+# Replacement model configuration (A3 - flow_midblock - default family)
+replacement_model:
+  family: "flow_midblock"
+  start_layer: 8
+  end_layer: 11
+  depth: 4
+  mlp_ratio: 4.0
+
 # Teacher State Mode: online_no_cache is now the default (disk-space friendly)
 teacher_state:
   mode: online_no_cache
