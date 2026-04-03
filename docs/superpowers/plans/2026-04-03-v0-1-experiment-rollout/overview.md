@@ -16,7 +16,7 @@
 | 4 | Queue execution | Continuous 3-GPU execution on Vast, durable ledger, eval automation | Phase 3 |
 | 5 | Launch and monitoring | Smoke test, full matrix execution, metrics aggregation | Phase 4 |
 
-**Current:** Phase 1
+**Current:** Phase 4 (queue execution system)
 
 ---
 
