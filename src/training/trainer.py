@@ -27,6 +27,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
 from collections import defaultdict
 
+# Optional wandb import
+try:
+    import wandb
+except ImportError:
+    wandb = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,6 +136,30 @@ class Trainer:
                 )
                 self.use_tensorboard = False
 
+        # Wandb setup
+        self.wandb_config = config.get("logging", {}).get("wandb", {})
+        self.use_wandb = self.wandb_config.get("enabled", False)
+
+        if self.use_wandb:
+            if wandb is not None:
+                self.wandb = wandb
+                wandb.init(
+                    project=self.wandb_config.get("project", "midflowlm"),
+                    entity=self.wandb_config.get("entity"),
+                    name=self.wandb_config.get("name"),
+                    tags=self.wandb_config.get("tags", []),
+                    config=config,
+                )
+                logger.info(
+                    f"Wandb enabled: logging to project={self.wandb_config.get('project', 'midflowlm')}, "
+                    f"entity={self.wandb_config.get('entity')}"
+                )
+            else:
+                logger.warning(
+                    "wandb not installed, disabling wandb logging. Install with: pip install wandb"
+                )
+                self.use_wandb = False
+
         logger.info(f"Initialized OnlineNoCacheTrainer on device: {self.device}")
         logger.info(f"  Precision: {self.precision}, AMP: {self.use_amp}")
         logger.info(f"  Gradient accumulation: {self.accumulate_grad_batches}")
@@ -139,6 +169,7 @@ class Trainer:
         logger.info(
             f"  Tensorboard: {'enabled' if self.use_tensorboard else 'disabled'}"
         )
+        logger.info(f"  Wandb: {'enabled' if self.use_wandb else 'disabled'}")
         logger.info(
             f"  Best-checkpoint monitor: {self.monitor_key} ({self.monitor_mode})"
         )
@@ -295,6 +326,19 @@ class Trainer:
         # Flush periodically
         if step % 100 == 0:
             self.tensorboard_writer.flush()
+
+    def _log_to_wandb(self, metrics: Dict[str, float], step: int) -> None:
+        """Log metrics to wandb.
+
+        Args:
+            metrics: Dictionary of metrics to log
+            step: Global step number
+        """
+        if not self.use_wandb:
+            return
+
+        metrics_with_step = {**metrics, "step": step}
+        self.wandb.log(metrics_with_step)
 
     def _get_loss_flags(self) -> Dict[str, bool]:
         """Determine which teacher targets are needed based on loss weights.
@@ -476,6 +520,9 @@ class Trainer:
         ):
             self._log_to_tensorboard(metrics)
 
+        if self.accumulation_step == 0 and self.use_wandb:
+            self._log_to_wandb(metrics, step=self.global_step)
+
         return metrics
 
     def val_step(
@@ -623,6 +670,10 @@ class Trainer:
                 )
                 self.tensorboard_writer.flush()
 
+        # Log validation metrics to wandb
+        if self.use_wandb:
+            self._log_to_wandb(avg_metrics, step=self.global_step)
+
         return avg_metrics
 
     def fit(self, max_epochs: Optional[int] = None) -> None:
@@ -717,11 +768,20 @@ class Trainer:
             self.tensorboard_writer.close()
             logger.info("Tensorboard writer closed")
 
+        # Close wandb
+        if self.use_wandb:
+            self.wandb.finish()
+            logger.info("Wandb run finished")
+
     def close(self) -> None:
-        """Close resources (tensorboard writer, etc.)."""
+        """Close resources (tensorboard writer, wandb, etc.)."""
         if self.use_tensorboard and self.tensorboard_writer is not None:
             self.tensorboard_writer.close()
             logger.info("Tensorboard writer closed")
+
+        if self.use_wandb:
+            self.wandb.finish()
+            logger.info("Wandb run finished")
 
     def save_checkpoint(self, path: Union[str, Path]) -> Path:
         path = Path(path)
