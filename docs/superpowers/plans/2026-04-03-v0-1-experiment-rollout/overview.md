@@ -13,10 +13,10 @@
 | 1 | v0.1 support closure | Trainable A1/A2/A3 families, loss-conditional targets, wandb integration, truncation logging | — |
 | 2 | Hardware calibration | Locked 3090 profile for seq_len=1024, worst-case loss regime | Phase 1 |
 | 3 | Config matrix generation | YAML configs for all P1/P2/P3/P4 experiments | Phase 2 |
-| 4 | Queue execution | Continuous 3-GPU execution on Vast, durable ledger, eval automation | Phase 3 |
-| 5 | Launch and monitoring | Smoke test, full matrix execution, metrics aggregation | Phase 4 |
+| 4 | Queue execution | Simple bash runner for 3-GPU execution | Phase 3 |
+| 5 | Launch and monitoring | Smoke test on Vast, then full matrix | Phase 4 |
 
-**Current:** Phase 4 (queue execution system)
+**Current:** Phase 5 (ready for Vast deployment)
 
 ---
 
