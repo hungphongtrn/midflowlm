@@ -1,0 +1,110 @@
+experiment_name: "v0_teacher_state_write_through_cache_smoke"
+
+teacher_state:
+  mode: online_write_through_cache
+
+teacher_cache:
+  enabled: true
+  cache_dir: "./cache/v0_teacher_state_write_through_smoke"
+  store_logits: true
+  store_hidden_states: true
+  overwrite: true
+
+data:
+  loader: "mixture"
+  seq_len: 128
+  batch_size: 2
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  shuffle_seed: 1337
+  mixture_components:
+    - name: "fineweb_edu"
+      dataset_name: "HuggingFaceFW/fineweb-edu"
+      dataset_config: "sample-10BT"
+      train_split: "train"
+      val_split: "train"
+      format_type: "plain_text"
+      text_field: "text"
+      train_samples: 100
+      val_samples: 20
+
+loss:
+  velocity_weight: 1.0
+  endpoint_weight: 0.0
+  trajectory_weight: 0.0
+  kl_weight: 0.25
+  ce_weight: 0.0
+  mask_padding_tokens: true
+
+model:
+  name: "Qwen/Qwen3.5-0.8B"
+  revision: null
+  max_steps_T: 32
+  time_domain: [0.0, 1.0]
+  time_embedding: "sinusoidal"
+  ode_solver:
+    method: "euler"
+    atol: 1.0e-5
+    rtol: 1.0e-5
+  reuse_qwen_modules: true
+
+replacement_model:
+  family: "minfm-hidden-refiner"
+  source_repo: "external/minFM"
+  source_commit: "2b15c5ffa9f6a083650994e385ee11ca23ee7ab7"
+  start_layer: 8
+  end_layer: 11
+  architecture_mode: "causal_hidden_refiner"
+  depth: 4
+  mlp_ratio: 4.0
+  qkv_bias: true
+  use_qwen_causal_mask: true
+  predict_velocity: true
+  use_step_conditioning: false
+  use_time_conditioning: true
+  conditioning_mode: "timestep_plus_layer_boundary"
+  init_strategy: "fresh"
+  trajectory_alignment:
+    T_less_than_depth:
+      policy: "compression"
+      description: "Compress teacher trajectory to match student steps"
+      method: "uniform_sampling"
+    T_equals_depth:
+      policy: "exact"
+      description: "Exact layerwise trajectory matching"
+      method: "one_to_one_mapping"
+    T_greater_than_depth:
+      policy: "expansion"
+      description: "Expand/interpolate teacher trajectory (approximate)"
+      method: "linear_interpolation"
+      note: "Results are approximate when T exceeds teacher depth"
+
+optimizer:
+  name: "adamw"
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+  grad_clip_norm: 1.0
+
+scheduler:
+  name: "cosine_with_warmup"
+  warmup_steps: 10
+
+train_loop:
+  precision: "bf16-mixed"
+  max_epochs: 1
+  accumulate_grad_batches: 1
+  log_every_n_steps: 10
+  val_check_interval: 50
+  gradient_checkpointing: false
+  sample_continuous_time: true
+  checkpoint_dir: "./outputs/v0_teacher_state_write_through_cache_smoke/checkpoints"
+  resume_from_checkpoint: null
+
+logging:
+  log_dir: "./outputs/v0_teacher_state_write_through_cache_smoke/logs"
+  save_top_k: 2
+  monitor: "val/total_loss"
+  mode: "min"

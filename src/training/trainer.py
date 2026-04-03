@@ -19,6 +19,9 @@ from typing import Dict, List, Optional, Union, Any, Tuple
 from collections import defaultdict
 import logging
 
+from src.model.qwen_parity import QwenInspector
+from src.training.teacher_state import get_teacher_state_mode, TeacherStateMode
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,8 +71,11 @@ class Trainer:
         self.train_loop_config = config.get("train_loop", {})
         self.model_config = config.get("model", {})
 
-        # Setup precision
+        # Setup precision first (needed for teacher state mode setup)
         self._setup_precision()
+
+        # Resolve teacher_state mode (needs precision set)
+        self._setup_teacher_state_mode()
 
         # Setup optimizer
         self.optimizer = self._create_optimizer()
@@ -105,11 +111,15 @@ class Trainer:
         # Logging
         self.log_every_n_steps = self.train_loop_config.get("log_every_n_steps", 10)
 
+        # Cache writer for write-through mode (initialized lazily)
+        self._cache_writer = None
+
         logger.info(f"Initialized Trainer on device: {self.device}")
         logger.info(f"  Precision: {self.precision}")
         logger.info(f"  AMP enabled: {self.use_amp}")
         logger.info(f"  Gradient accumulation: {self.accumulate_grad_batches}")
         logger.info(f"  Train T values: {self.train_T_values}")
+        logger.info(f"  Teacher state mode: {self.teacher_state_mode.value}")
 
     def _setup_precision(self):
         """Setup precision settings for training."""
@@ -132,6 +142,160 @@ class Trainer:
             self.precision = "fp32"
             self.use_amp = False
             self.amp_dtype = torch.float32
+
+    def _setup_teacher_state_mode(self):
+        """Setup teacher state mode and initialize related components.
+
+        Resolves the teacher_state mode from config. Components like QwenInspector
+        and cache writer are initialized lazily on first use.
+        """
+        self.teacher_state_mode = get_teacher_state_mode(self.config)
+
+        self._inspector = None
+        self._cache_writer = None
+
+        logger.info(f"Teacher state mode: {self.teacher_state_mode.value}")
+        if self.teacher_state_mode.requires_live_teacher():
+            logger.info("  Live teacher extraction: enabled (lazy initialization)")
+        if self.teacher_state_mode.allow_cache_write():
+            logger.info("  Cache writing: enabled (lazy initialization)")
+
+    def _get_live_teacher_extractor(self):
+        """Get or create QwenInspector for live teacher state extraction.
+
+        Returns:
+            QwenInspector instance
+        """
+        if self._inspector is None:
+            model_name = self.model_config.get("name", "Qwen/Qwen3.5-0.8B")
+            replacement_config = self.config.get("replacement_model", {})
+            start_layer = replacement_config.get("start_layer", 8)
+            end_layer = replacement_config.get("end_layer", 11)
+
+            self._inspector = QwenInspector(
+                model_name=model_name,
+                start_layer=start_layer,
+                end_layer=end_layer,
+                device=self.device,
+                dtype=self.amp_dtype if self.use_amp else torch.float32,
+            )
+            logger.info(
+                f"Initialized QwenInspector for live extraction: model={model_name}, "
+                f"layers={start_layer}-{end_layer}"
+            )
+        return self._inspector
+
+    def _setup_cache_writer(self):
+        """Initialize cache writer for write-through mode."""
+        from src.data.teacher_cache import TeacherCacheWriter
+
+        teacher_cache_config = self.config.get("teacher_cache", {})
+        cache_dir = teacher_cache_config.get("cache_dir", "./cache/write_through")
+        model_name = self.model_config.get("name", "Qwen/Qwen3.5-0.8B")
+        replacement_config = self.config.get("replacement_model", {})
+        start_layer = replacement_config.get("start_layer", 8)
+        end_layer = replacement_config.get("end_layer", 11)
+        seq_len = self.config.get("data", {}).get("seq_len", 128)
+        store_logits = teacher_cache_config.get("store_logits", False)
+
+        self._cache_writer = TeacherCacheWriter(
+            cache_dir=cache_dir,
+            model_name=model_name,
+            start_layer=start_layer,
+            end_layer=end_layer,
+            seq_len=seq_len,
+            store_logits=store_logits,
+        )
+        logger.info(f"Initialized cache writer for write-through mode: {cache_dir}")
+
+    def _maybe_extract_teacher_states(
+        self, batch: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        """Extract teacher states for online modes if not already in batch.
+
+        For online_no_cache and online_write_through_cache modes, if the batch
+        doesn't contain h_start (i.e., comes from token dataset without pre-computed
+        teacher states), extract them using QwenInspector and optionally write to cache.
+
+        Args:
+            batch: Batch dictionary, possibly missing teacher states
+
+        Returns:
+            Batch with teacher states populated (h_start, velocity_target, optional h_target)
+        """
+        if "h_start" in batch and "velocity_target" in batch:
+            return batch
+
+        inspector = self._get_live_teacher_extractor()
+
+        logger.debug("Extracting live teacher states for online mode")
+        input_ids = batch["input_ids"]
+        attention_mask = batch.get("attention_mask")
+
+        with torch.no_grad():
+            outputs = inspector.extract_all(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+            )
+
+        h_start = outputs["h_start"]
+        h_target = outputs["h_target"]
+        velocity_target = h_target - h_start
+
+        teacher_batch = {
+            **batch,
+            "h_start": h_start,
+            "velocity_target": velocity_target,
+            "h_target": h_target,
+        }
+
+        if "logits" in outputs:
+            teacher_batch["teacher_logits"] = outputs["logits"]
+
+        if (
+            self.teacher_state_mode.allow_cache_write()
+            and self._cache_writer is not None
+        ):
+            self._write_teacher_states_to_cache(teacher_batch)
+
+        return teacher_batch
+
+    def _write_teacher_states_to_cache(
+        self, teacher_batch: Dict[str, torch.Tensor]
+    ) -> None:
+        """Write teacher states to cache for write-through mode.
+
+        Args:
+            teacher_batch: Batch dictionary with teacher states
+        """
+        if not hasattr(self, "_cache_write_idx"):
+            self._cache_write_idx = 0
+
+        num_samples = teacher_batch["input_ids"].shape[0]
+        num_shards = 1
+
+        sample_data = {
+            "input_ids": teacher_batch["input_ids"].cpu(),
+            "attention_mask": teacher_batch.get(
+                "attention_mask", torch.ones_like(teacher_batch["input_ids"])
+            ).cpu(),
+            "h_start": teacher_batch["h_start"].cpu(),
+            "velocity_target": teacher_batch["velocity_target"].cpu(),
+        }
+
+        if "h_target" in teacher_batch:
+            sample_data["h_target"] = teacher_batch["h_target"].cpu()
+        if "teacher_logits" in teacher_batch:
+            sample_data["teacher_logits"] = teacher_batch["teacher_logits"].cpu()
+
+        self._cache_writer.write_shard(
+            sample_data=sample_data,
+            shard_idx=self._cache_write_idx,
+            num_shards=num_shards,
+        )
+        self._cache_write_idx += 1
+
+        logger.debug(f"Wrote teacher states to cache (shard {self._cache_write_idx})")
 
     def _create_optimizer(self) -> torch.optim.Optimizer:
         """Create optimizer from config."""
@@ -291,6 +455,10 @@ class Trainer:
             for k, v in batch.items()
         }
 
+        # For online modes, extract teacher states if not already in batch
+        if self.teacher_state_mode.requires_live_teacher():
+            batch = self._maybe_extract_teacher_states(batch)
+
         # Sample continuous time if enabled
         sample_continuous_time = self.train_loop_config.get(
             "sample_continuous_time", False
@@ -420,6 +588,10 @@ class Trainer:
             k: v.to(self.device) if isinstance(v, torch.Tensor) else v
             for k, v in batch.items()
         }
+
+        # For online modes, extract teacher states if not already in batch
+        if self.teacher_state_mode.requires_live_teacher():
+            batch = self._maybe_extract_teacher_states(batch)
 
         # Sample continuous time if enabled
         sample_continuous_time = self.train_loop_config.get(

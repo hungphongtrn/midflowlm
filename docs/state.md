@@ -135,3 +135,33 @@ The codebase is in a usable experimental state for hidden-state architecture tra
 3. Add automatic repetition metrics to JSON output
 4. Expand qualitative evaluation to a larger prompt set before making training-direction decisions
 5. If repetition persists under better decoding, discuss behavior-training objectives rather than increasing step count
+
+---
+
+## KL Follow-up Progressive Disclosure (2026-03-22)
+
+### What was built
+
+Added three-mode teacher state sourcing infrastructure supporting offline cache, live extraction, and write-through cache.
+
+**Files created**:
+- `src/training/teacher_state.py` - mode enum + resolution/validation helpers
+- `configs/v0_teacher_state_online_no_cache_smoke.yaml` - online no-cache smoke config
+- `configs/v0_teacher_state_write_through_cache_smoke.yaml` - write-through smoke config
+- `configs/v0_mixed_corpus_plus_kl_loss_long_context.yaml` - long-context variant (seq_len=512)
+- `tests/test_teacher_state_modes.py` - 15 mode contract tests
+- `tests/test_teacher_state_parity.py` - parity tests (3 passed, 2 GPU-integration skipped)
+
+**Files modified**:
+- `src/training/trainer.py` - added mode-aware teacher state handling
+- `src/training/data.py` - added `validate_cache_compatibility()`
+- `scripts/train_v0.py` - mode routing, validation, online dataloader path
+- `tests/test_train_smoke.py` - 3 new mode-specific trainer tests
+- `src/eval/mmlu_pro_behavior.py` - fixed regex for parenthetical options
+
+**Smoke results**:
+- Online no-cache: PASS (train step + val step + perplexity + checkpoint)
+- Write-through: PASS (same, plus cache writes)
+- Offline: validation fails with correct mismatch error (cache store_logits=False vs kl_weight=0.25)
+
+**Tests**: 72 passed, 2 failed (pre-existing TestDatasetFactory baseline failures)

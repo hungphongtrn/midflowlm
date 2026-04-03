@@ -573,3 +573,468 @@ def test_gradient_accumulation():
     # Fourth step should trigger optimizer step
     metrics = trainer.train_step(batch, T=4)
     assert trainer.accumulation_step == 0  # Reset after optimizer step
+
+
+def test_train_script_dataloader_validates_cache_compatibility():
+    """Test that train_v0.py create_dataloaders validates cache compatibility before building loaders.
+
+    This test proves that the train-script path (scripts/train_v0.py::create_dataloaders)
+    properly validates cache compatibility BEFORE creating dataloaders. Without this validation,
+    mismatched seq_len or missing teacher_logits would only be caught at train step time with
+    confusing errors like 'teacher_logits not in teacher_batch but kl_weight > 0.0'.
+    """
+    import sys
+    from pathlib import Path
+    from unittest.mock import patch, MagicMock
+    import src.training.data as data_module
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    import train_v0
+    from train_v0 import create_dataloaders
+
+    mock_metadata = MagicMock()
+    mock_metadata.model_name = "Qwen/Qwen3.5-0.8B"
+    mock_metadata.model_revision = None
+    mock_metadata.start_layer = 8
+    mock_metadata.end_layer = 11
+    mock_metadata.span_depth = 4
+    mock_metadata.seq_len = 256
+    mock_metadata.store_logits = True
+
+    config = {
+        "model": {"name": "Qwen/Qwen3.5-0.8B", "revision": None},
+        "replacement_model": {"start_layer": 8, "end_layer": 11},
+        "data": {
+            "seq_len": 512,
+            "batch_size": 2,
+            "num_workers": 0,
+        },
+        "loss": {"kl_weight": 0.25},
+    }
+
+    with patch.object(data_module, "_load_metadata", return_value=mock_metadata):
+        with pytest.raises(ValueError, match="seq_len mismatch"):
+            create_dataloaders(config, cache_dir="./fake_cache_dir")
+
+
+def test_train_script_dataloader_catches_missing_logits_when_kl_weight_positive():
+    """Test that train_v0.py create_dataloaders catches missing teacher_logits when kl_weight > 0.
+
+    When kl_weight > 0, the cache MUST have store_logits=True. If the cache was built without
+    logits but config has kl_weight > 0, validation should fail at dataloader creation time
+    rather than failing at training time with 'teacher_logits not in teacher_batch'.
+    """
+    import sys
+    from pathlib import Path
+    from unittest.mock import patch, MagicMock
+    import src.training.data as data_module
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    import train_v0
+    from train_v0 import create_dataloaders
+
+    mock_metadata = MagicMock()
+    mock_metadata.model_name = "Qwen/Qwen3.5-0.8B"
+    mock_metadata.model_revision = None
+    mock_metadata.start_layer = 8
+    mock_metadata.end_layer = 11
+    mock_metadata.span_depth = 4
+    mock_metadata.seq_len = 512
+    mock_metadata.store_logits = False
+
+    config = {
+        "model": {"name": "Qwen/Qwen3.5-0.8B", "revision": None},
+        "replacement_model": {"start_layer": 8, "end_layer": 11},
+        "data": {"seq_len": 512, "batch_size": 2, "num_workers": 0},
+        "loss": {"kl_weight": 0.25},
+    }
+
+    with patch.object(data_module, "_load_metadata", return_value=mock_metadata):
+        with pytest.raises(ValueError, match="store_logits is False but kl_weight"):
+            create_dataloaders(config, cache_dir="./fake_cache_dir")
+
+
+def test_teacher_state_offline_cache_routes_to_cache_dataloader():
+    """Test that offline_cache mode uses create_cache_dataloader path.
+
+    When teacher_state.mode is 'offline_cache', the router should call
+    create_cache_dataloader (not get_experiment_dataloaders).
+    """
+    from unittest.mock import MagicMock, patch, Mock
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    from train_v0 import create_dataloaders
+
+    offline_config = {
+        "teacher_state": {"mode": "offline_cache"},
+        "model": {"name": "Qwen/Qwen3.5-0.8B", "revision": None},
+        "replacement_model": {"start_layer": 8, "end_layer": 11},
+        "data": {
+            "seq_len": 256,
+            "batch_size": 2,
+            "num_workers": 0,
+            "pin_memory": False,
+        },
+        "loss": {"kl_weight": 0.25},
+    }
+
+    with patch("train_v0.create_cache_dataloader") as mock_cache_loader:
+        mock_cache_loader.return_value = (MagicMock(), MagicMock())
+        with patch("train_v0.validate_cache_compatibility"):
+            create_dataloaders(offline_config, cache_dir="./fake_cache")
+
+        assert mock_cache_loader.called, (
+            "offline_cache mode should call create_cache_dataloader"
+        )
+
+
+def test_teacher_state_online_no_cache_routes_to_token_dataset():
+    """Test that online_no_cache mode uses get_experiment_dataloaders path.
+
+    When teacher_state.mode is 'online_no_cache', the router should call
+    get_experiment_dataloaders (not create_cache_dataloader).
+    Currently this raises NotImplementedError - this test should FAIL until routing is implemented.
+    """
+    from unittest.mock import MagicMock, patch, Mock
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    import train_v0
+    from src.data.dataset_factory import get_experiment_dataloaders
+
+    online_config = {
+        "teacher_state": {"mode": "online_no_cache"},
+        "model": {"name": "Qwen/Qwen3.5-0.8B", "revision": None},
+        "replacement_model": {"start_layer": 8, "end_layer": 11},
+        "data": {
+            "loader": "mixture",
+            "seq_len": 128,
+            "batch_size": 2,
+            "num_workers": 0,
+            "pin_memory": False,
+            "mixture_components": [
+                {
+                    "name": "fineweb_edu",
+                    "dataset_name": "HuggingFaceFW/fineweb-edu",
+                    "dataset_config": "sample-10BT",
+                    "train_split": "train",
+                    "val_split": "train",
+                    "format_type": "plain_text",
+                    "text_field": "text",
+                    "train_samples": 100,
+                    "val_samples": 20,
+                }
+            ],
+        },
+        "loss": {"kl_weight": 0.25},
+    }
+
+    with patch.object(
+        train_v0, "get_experiment_dataloaders", wraps=get_experiment_dataloaders
+    ) as mock_get_exp_dl:
+        mock_get_exp_dl.return_value = {
+            "train": MagicMock(),
+            "val": MagicMock(),
+        }
+        train_loader, val_loader = train_v0.create_dataloaders(
+            online_config, cache_dir="./fake_cache"
+        )
+
+        assert mock_get_exp_dl.called, (
+            "online_no_cache mode should call get_experiment_dataloaders (token dataset path), "
+            "not an offline cache loader"
+        )
+        assert train_loader is mock_get_exp_dl.return_value["train"]
+        assert val_loader is mock_get_exp_dl.return_value["val"]
+
+
+def test_teacher_state_online_write_through_routes_to_token_dataset():
+    """Test that online_write_through_cache mode uses get_experiment_dataloaders path.
+
+    When teacher_state.mode is 'online_write_through_cache', the router should call
+    get_experiment_dataloaders (not create_cache_dataloader).
+    Currently this raises NotImplementedError - this test should FAIL until routing is implemented.
+    """
+    from unittest.mock import MagicMock, patch, Mock
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    import train_v0
+    from src.data.dataset_factory import get_experiment_dataloaders
+
+    write_through_config = {
+        "teacher_state": {"mode": "online_write_through_cache"},
+        "model": {"name": "Qwen/Qwen3.5-0.8B", "revision": None},
+        "replacement_model": {"start_layer": 8, "end_layer": 11},
+        "teacher_cache": {"enabled": True},
+        "data": {
+            "loader": "mixture",
+            "seq_len": 128,
+            "batch_size": 2,
+            "num_workers": 0,
+            "pin_memory": False,
+            "mixture_components": [
+                {
+                    "name": "fineweb_edu",
+                    "dataset_name": "HuggingFaceFW/fineweb-edu",
+                    "dataset_config": "sample-10BT",
+                    "train_split": "train",
+                    "val_split": "train",
+                    "format_type": "plain_text",
+                    "text_field": "text",
+                    "train_samples": 100,
+                    "val_samples": 20,
+                }
+            ],
+        },
+        "loss": {"kl_weight": 0.25},
+    }
+
+    with patch.object(
+        train_v0, "get_experiment_dataloaders", wraps=get_experiment_dataloaders
+    ) as mock_get_exp_dl:
+        mock_get_exp_dl.return_value = {
+            "train": MagicMock(),
+            "val": MagicMock(),
+        }
+        train_loader, val_loader = train_v0.create_dataloaders(
+            write_through_config, cache_dir="./fake_cache"
+        )
+
+        assert mock_get_exp_dl.called, (
+            "online_write_through_cache mode should call get_experiment_dataloaders (token dataset path), "
+            "not an offline cache loader"
+        )
+        assert train_loader is mock_get_exp_dl.return_value["train"]
+        assert val_loader is mock_get_exp_dl.return_value["val"]
+
+
+class TestTrainerTeacherStateModes:
+    """Tests for trainer behavior with different teacher_state modes.
+
+    Task 6: Teach the trainer to compute or consume teacher states per mode:
+    - offline_cache: Consumes cached h_start, velocity_target, optional teacher_logits from batch
+    - online_no_cache: Performs live teacher extraction and populates loss batch
+    - online_write_through_cache: Performs live extraction and calls cache writer hook
+    """
+
+    def test_trainer_offline_mode_consumes_cached_teacher_states(self):
+        """Trainer in offline_cache mode should consume cached teacher states from batch.
+
+        When using offline_cache mode, the batch already contains h_start,
+        velocity_target, and optional teacher_logits from the pre-built cache.
+        The trainer should pass these directly to the loss function.
+        """
+        from src.training.trainer import Trainer
+        import torch.nn as nn
+        from unittest.mock import MagicMock, Mock
+
+        mock_model = MagicMock()
+        endpoint_hidden = torch.randn(2, 16, 128, requires_grad=True)
+        mock_model.return_value = {
+            "endpoint_hidden": endpoint_hidden,
+            "trajectory_hidden": torch.randn(2, 16, 4, 128),
+            "logits": torch.randn(2, 16, 1000),
+        }
+        mock_param = nn.Parameter(torch.randn(10))
+        mock_model.parameters = Mock(return_value=[mock_param])
+
+        mock_loss_fn = MagicMock()
+
+        def loss_side_effect(student_outputs, teacher_batch, T, model=None, t=None):
+            h_start = teacher_batch["h_start"]
+            velocity_target = teacher_batch["velocity_target"]
+            assert h_start is not None, "offline mode batch should contain h_start"
+            assert velocity_target is not None, (
+                "offline mode batch should contain velocity_target"
+            )
+            loss_val = student_outputs["endpoint_hidden"].mean() * 0.1
+            return loss_val, {"total_loss": loss_val.item()}
+
+        mock_loss_fn.side_effect = loss_side_effect
+
+        config = {
+            "teacher_state": {"mode": "offline_cache"},
+            "optimizer": {"name": "adamw", "learning_rate": 1e-4, "weight_decay": 0.01},
+            "scheduler": {"name": "cosine_with_warmup", "warmup_steps": 10},
+            "train_loop": {"precision": "fp32", "accumulate_grad_batches": 1},
+            "model": {"train_T_values": [4], "train_T_weights": [1.0]},
+        }
+
+        trainer = Trainer(
+            model=mock_model,
+            loss_fn=mock_loss_fn,
+            config=config,
+            device="cpu",
+        )
+
+        h_start = torch.randn(2, 16, 128)
+        h_target = torch.randn(2, 16, 128)
+        batch = {
+            "input_ids": torch.randint(0, 1000, (2, 16)),
+            "attention_mask": torch.ones(2, 16, dtype=torch.int64),
+            "h_start": h_start,
+            "velocity_target": h_target - h_start,
+            "teacher_logits": torch.randn(2, 16, 1000),
+        }
+
+        metrics = trainer.train_step(batch, T=4)
+        assert "loss" in metrics
+        mock_loss_fn.assert_called_once()
+
+    def test_trainer_online_no_cache_mode_extracts_live_teacher_states(self):
+        """Trainer in online_no_cache mode should perform live teacher extraction.
+
+        When using online_no_cache mode, the batch only contains input_ids
+        and attention_mask. The trainer should extract teacher states using
+        QwenInspector and populate h_start, velocity_target for the loss function.
+        """
+        from src.training.trainer import Trainer
+        import torch.nn as nn
+        from unittest.mock import MagicMock, Mock, patch
+
+        mock_model = MagicMock()
+        endpoint_hidden = torch.randn(2, 16, 128, requires_grad=True)
+        mock_model.return_value = {
+            "endpoint_hidden": endpoint_hidden,
+            "trajectory_hidden": torch.randn(2, 16, 4, 128),
+            "logits": torch.randn(2, 16, 1000),
+        }
+        mock_param = nn.Parameter(torch.randn(10))
+        mock_model.parameters = Mock(return_value=[mock_param])
+
+        captured_batch = {}
+        mock_loss_fn = MagicMock()
+
+        def loss_side_effect(student_outputs, teacher_batch, T, model=None, t=None):
+            captured_batch["teacher_batch"] = teacher_batch
+            loss_val = student_outputs["endpoint_hidden"].mean() * 0.1
+            return loss_val, {"total_loss": loss_val.item()}
+
+        mock_loss_fn.side_effect = loss_side_effect
+
+        config = {
+            "teacher_state": {"mode": "online_no_cache"},
+            "model": {
+                "name": "Qwen/Qwen3.5-0.8B",
+                "train_T_values": [4],
+                "train_T_weights": [1.0],
+            },
+            "replacement_model": {"start_layer": 8, "end_layer": 11},
+            "optimizer": {"name": "adamw", "learning_rate": 1e-4, "weight_decay": 0.01},
+            "scheduler": {"name": "cosine_with_warmup", "warmup_steps": 10},
+            "train_loop": {"precision": "fp32", "accumulate_grad_batches": 1},
+        }
+
+        trainer = Trainer(
+            model=mock_model,
+            loss_fn=mock_loss_fn,
+            config=config,
+            device="cpu",
+        )
+
+        mock_inspector = MagicMock()
+        mock_inspector.extract_all.return_value = {
+            "h_start": torch.randn(2, 16, 128),
+            "h_target": torch.randn(2, 16, 128),
+            "logits": torch.randn(2, 16, 1000),
+        }
+
+        batch_no_teacher = {
+            "input_ids": torch.randint(0, 1000, (2, 16)),
+            "attention_mask": torch.ones(2, 16, dtype=torch.int64),
+        }
+
+        with patch("src.training.trainer.QwenInspector", return_value=mock_inspector):
+            metrics = trainer.train_step(batch_no_teacher, T=4)
+
+        assert "loss" in metrics
+        assert "h_start" in captured_batch["teacher_batch"], (
+            "online_no_cache mode should populate h_start via live extraction"
+        )
+        assert "velocity_target" in captured_batch["teacher_batch"], (
+            "online_no_cache mode should populate velocity_target via live extraction"
+        )
+
+    def test_trainer_online_write_through_mode_extracts_and_writes_cache(self):
+        """Trainer in write_through_cache mode should extract and write to cache.
+
+        When using online_write_through_cache mode, the trainer should:
+        1. Perform live teacher extraction (like online_no_cache)
+        2. Call the cache writer hook to persist teacher states
+        """
+        from src.training.trainer import Trainer
+        import torch.nn as nn
+        from unittest.mock import MagicMock, Mock, patch
+
+        mock_model = MagicMock()
+        endpoint_hidden = torch.randn(2, 16, 128, requires_grad=True)
+        mock_model.return_value = {
+            "endpoint_hidden": endpoint_hidden,
+            "trajectory_hidden": torch.randn(2, 16, 4, 128),
+            "logits": torch.randn(2, 16, 1000),
+        }
+        mock_param = nn.Parameter(torch.randn(10))
+        mock_model.parameters = Mock(return_value=[mock_param])
+
+        captured_batch = {}
+        mock_loss_fn = MagicMock()
+
+        def loss_side_effect(student_outputs, teacher_batch, T, model=None, t=None):
+            captured_batch["teacher_batch"] = teacher_batch
+            loss_val = student_outputs["endpoint_hidden"].mean() * 0.1
+            return loss_val, {"total_loss": loss_val.item()}
+
+        mock_loss_fn.side_effect = loss_side_effect
+
+        mock_cache_writer = MagicMock()
+
+        config = {
+            "teacher_state": {"mode": "online_write_through_cache"},
+            "model": {
+                "name": "Qwen/Qwen3.5-0.8B",
+                "train_T_values": [4],
+                "train_T_weights": [1.0],
+            },
+            "replacement_model": {"start_layer": 8, "end_layer": 11},
+            "teacher_cache": {"enabled": True, "cache_dir": "./cache/write"},
+            "optimizer": {"name": "adamw", "learning_rate": 1e-4, "weight_decay": 0.01},
+            "scheduler": {"name": "cosine_with_warmup", "warmup_steps": 10},
+            "train_loop": {"precision": "fp32", "accumulate_grad_batches": 1},
+        }
+
+        trainer = Trainer(
+            model=mock_model,
+            loss_fn=mock_loss_fn,
+            config=config,
+            device="cpu",
+        )
+        trainer._cache_writer = mock_cache_writer
+
+        mock_inspector = MagicMock()
+        mock_inspector.extract_all.return_value = {
+            "h_start": torch.randn(2, 16, 128),
+            "h_target": torch.randn(2, 16, 128),
+            "logits": torch.randn(2, 16, 1000),
+        }
+
+        batch_no_teacher = {
+            "input_ids": torch.randint(0, 1000, (2, 16)),
+            "attention_mask": torch.ones(2, 16, dtype=torch.int64),
+        }
+
+        with patch("src.training.trainer.QwenInspector", return_value=mock_inspector):
+            metrics = trainer.train_step(batch_no_teacher, T=4)
+
+        assert "loss" in metrics
+        assert "h_start" in captured_batch["teacher_batch"], (
+            "write_through mode should populate h_start via live extraction"
+        )
+        (
+            mock_cache_writer.write_shard.assert_called_once(),
+            ("write_through mode should call cache_writer.write_shard"),
+        )

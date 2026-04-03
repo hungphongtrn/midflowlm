@@ -118,12 +118,7 @@ Answer:"""
             prompt,
             flags=re.DOTALL,
         )
-        prompt = (
-            "<|im_start|>user\n"
-            + prompt
-            + "<|im_start|>assistant\n"
-            + prompt
-        )
+        prompt = "<|im_start|>user\n" + prompt + "<|im_start|>assistant\n" + prompt
     elif prompt_behavior == "closed_think":
         prompt = (
             "<|im_start|>assistant\n<think>\n"
@@ -153,7 +148,9 @@ def extract_first_valid_answer(text: str, valid_options: list[str]) -> Optional[
         return start_match.group(1)
 
     for opt in valid_options:
-        pattern = r"(?:(?<=^)|(?<=\s))" + re.escape(opt) + r"(?=\s|$|[.,!?;:()\[\]])";
+        pattern = (
+            r"(?:(?<=^)|(?<=[\s\(\[\{]))" + re.escape(opt) + r"(?=\s|$|[.,!?;:()\[\]])"
+        )
         if re.search(pattern, normalized):
             return opt
 
