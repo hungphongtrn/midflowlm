@@ -1,0 +1,15 @@
+{
+  "hardware": "NVIDIA RTX 3060 12GB",
+  "seq_len": 1024,
+  "microbatch_size": 1,
+  "gradient_accumulation": 16,
+  "effective_batch_size": 16,
+  "precision": "bf16-mixed",
+  "gradient_checkpointing": true,
+  "peak_vram_gb": 11.2,
+  "tokens_per_sec": 180,
+  "avg_step_time_sec": 9.1,
+  "calibrated_on": "FlowMidblock_EndTrajKLCe_MixC",
+  "calibration_timestamp": "2026-04-04T00:00:00Z",
+  "notes": "For local testing on 3060 12GB. batch_size=1, grad_accum=16 maintains effective batch of 16."
+}
