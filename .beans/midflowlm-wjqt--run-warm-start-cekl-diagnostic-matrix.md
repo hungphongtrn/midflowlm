@@ -1,11 +1,11 @@
 ---
 # midflowlm-wjqt
 title: Run warm-start CE/KL diagnostic matrix
-status: in-progress
+status: scrapped
 type: task
 priority: high
 created_at: 2026-03-28T08:50:13Z
-updated_at: 2026-03-28T09:45:47Z
+updated_at: 2026-04-03T14:00:06Z
 parent: midflowlm-g4k0
 blocking:
     - midflowlm-ynvr

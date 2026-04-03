@@ -1,14 +1,16 @@
 experiment_name: "v0_qwen_mixed_corpus_midblock_plus_kl_loss_long_context"
 
+# Teacher State Mode: online_no_cache is now the default (disk-space friendly)
+teacher_state:
+  mode: online_no_cache
+
+# Teacher Cache: Disabled by default. Set enabled: true only if needed.
 teacher_cache:
-  enabled: true
+  enabled: false
   cache_dir: "./cache/mixed_qwen_boundary_states"
   store_logits: true
   store_hidden_states: true
   overwrite: false
-
-teacher_state:
-  mode: offline_cache
 
 data:
   loader: "mixture"

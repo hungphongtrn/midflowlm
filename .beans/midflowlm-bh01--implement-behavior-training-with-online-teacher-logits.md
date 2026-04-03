@@ -1,7 +1,7 @@
 ---
 # midflowlm-bh01
 title: 'MidflowLM: implement behavior training with online teacher logits'
-status: todo
+status: scrapped
 type: task
 priority: normal
 tags:
@@ -10,7 +10,7 @@ tags:
     - behavior-training
     - distillation
 created_at: 2026-03-17T00:00:00Z
-updated_at: 2026-03-17T00:00:00Z
+updated_at: 2026-04-03T14:00:19Z
 ---
 
 # Fresh-context follow-up task

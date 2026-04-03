@@ -1,11 +1,11 @@
 ---
 # midflowlm-g4k0
 title: Mixed-corpus cache and retraining
-status: in-progress
+status: scrapped
 type: feature
 priority: normal
 created_at: 2026-03-19T10:29:05Z
-updated_at: 2026-03-19T10:29:30Z
+updated_at: 2026-04-03T14:00:22Z
 ---
 
 Add mixed-format teacher-cache pipeline and rerun MidflowLM training on broader data to test data-coverage hypothesis for MMLU-Pro.

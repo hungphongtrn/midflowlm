@@ -2,6 +2,18 @@ experiment_name: "v0_warmstart_kl_only"
 
 seed: 1337
 
+# Teacher State Mode: online_no_cache is now the default (disk-space friendly)
+teacher_state:
+  mode: online_no_cache
+
+# Teacher Cache: Disabled by default. Set enabled: true only if needed.
+teacher_cache:
+  enabled: false
+  cache_dir: "./cache/warmstart_qwen_boundary_states"
+  store_logits: true
+  store_hidden_states: true
+  overwrite: false
+
 model:
   name: "Qwen/Qwen3.5-0.8B"
   revision: null

@@ -1,7 +1,7 @@
 ---
 # midflowlm-hnnz
 title: Rerun one-epoch corrected mixed-corpus midflow training with fresh optimizer
-status: todo
+status: scrapped
 type: task
 priority: critical
 tags:
@@ -9,7 +9,7 @@ tags:
     - experiment
     - rerun
 created_at: 2026-03-26T15:45:40Z
-updated_at: 2026-03-26T15:45:40Z
+updated_at: 2026-04-03T14:00:08Z
 parent: midflowlm-g4k0
 blocked_by:
     - midflowlm-gz99

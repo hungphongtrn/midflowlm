@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
-"""Training script for v0 iterative midblock.
+"""DEPRECATED: Training script for v0 iterative midblock.
+
+⚠️ WARNING: This script is deprecated and will be removed in a future version.
+Please use scripts/train.py instead, which uses online calculation by default
+and does not require teacher-state caching.
 
 This script runs the full training loop for the Qwen iterative midblock student.
-It supports:
-- Loading from teacher cache
+It primarily supports cache-based training modes:
+- Loading from teacher cache (offline_cache mode)
 - Fixed-T or variable-T training
 - Resume from checkpoint
 - Fast dev run for smoke testing
 - Limited batch runs for quick validation
 
-Usage:
+Usage (deprecated):
+    # This script is deprecated - use scripts/train.py instead
     python scripts/train_v0.py --config configs/v0_onemotif.yaml
-    python scripts/train_v0.py --config configs/v0_onemotif.yaml --fast-dev-run
-    python scripts/train_v0.py --config configs/v0_onemotif.yaml --resume-from-checkpoint ./checkpoints/best.ckpt
-    python scripts/train_v0.py --config configs/v0_onemotif.yaml --limit-train-batches 10 --limit-val-batches 5
+
+Recommended (new):
+    python scripts/train.py --config configs/v0_online_no_cache_mixed_ce_kl.yaml
 """
 
 import argparse
@@ -689,6 +694,16 @@ def _create_online_dataloaders(config: dict) -> dict:
 
 
 def main():
+    # Emit deprecation warning immediately
+    import warnings
+
+    warnings.warn(
+        "train_v0.py is deprecated. Use scripts/train.py instead, "
+        "which defaults to online_no_cache mode and does not require caching.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     parser = argparse.ArgumentParser(description="Train v0 iterative midblock")
     parser.add_argument(
         "--config", type=str, required=True, help="Path to config YAML file"
@@ -747,6 +762,11 @@ def main():
     )
 
     # Log configuration
+    logger.warning("=" * 60)
+    logger.warning("DEPRECATION WARNING: train_v0.py is deprecated!")
+    logger.warning("Please use scripts/train.py instead.")
+    logger.warning("The new script defaults to online_no_cache mode.")
+    logger.warning("=" * 60)
     logger.info(f"Loading config from {args.config}")
     logger.info(f"Experiment name: {config['experiment_name']}")
 

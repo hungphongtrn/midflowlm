@@ -1,42 +1,13 @@
 experiment_name: "v0_qwen_iterative_midblock_smoke"
 seed: 1337
 
-model:
-  name: "Qwen/Qwen3.5-0.8B"
-  revision: null
-  max_steps_T: 8
-  train_T_values: [1, 2, 4]
-  train_T_weights: [0.4, 0.4, 0.2]
-  step_embedding: "discrete"
-  reuse_qwen_modules: true
+# Teacher State Mode: online_no_cache is now the default (disk-space friendly)
+teacher_state:
+  mode: online_no_cache
 
-replacement_model:
-  family: "minfm-hidden-refiner"
-  source_repo: "external/minFM"
-  source_commit: "2b15c5ffa9f6a083650994e385ee11ca23ee7ab7"
-  start_layer: 8
-  end_layer: 11
-  architecture_mode: "causal_hidden_refiner"
-  depth: 4
-  mlp_ratio: 4.0
-  qkv_bias: true
-  use_qwen_causal_mask: true
-  use_step_conditioning: true
-  conditioning_mode: "timestep_plus_layer_boundary"
-  init_strategy: "fresh"
-  trajectory_alignment:
-    T_less_than_depth:
-      policy: "compression"
-      method: "uniform_sampling"
-    T_equals_depth:
-      policy: "exact"
-      method: "one_to_one_mapping"
-    T_greater_than_depth:
-      policy: "expansion"
-      method: "linear_interpolation"
-
+# Teacher Cache: Disabled by default. Set enabled: true only if needed.
 teacher_cache:
-  enabled: true
+  enabled: false
   cache_dir: "./cache/tinystories_qwen_boundary_states_smoke"
   store_logits: false
   store_hidden_states: true

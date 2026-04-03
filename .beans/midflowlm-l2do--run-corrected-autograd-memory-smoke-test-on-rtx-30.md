@@ -1,7 +1,7 @@
 ---
 # midflowlm-l2do
 title: Run corrected autograd memory smoke test on RTX 3060 12GB
-status: todo
+status: scrapped
 type: task
 priority: high
 tags:
@@ -9,7 +9,7 @@ tags:
     - memory
     - smoke-test
 created_at: 2026-03-26T15:45:14Z
-updated_at: 2026-03-26T15:45:14Z
+updated_at: 2026-04-03T14:00:10Z
 parent: midflowlm-g4k0
 blocked_by:
     - midflowlm-gz99

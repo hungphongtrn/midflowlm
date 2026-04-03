@@ -40,44 +40,29 @@ flowchart TB
     style ODE fill:#45b7d1,stroke:#333,stroke-width:2px
 ```
 
-## Two-Phase Training Paradigm
+## Training Paradigm (Online Calculation)
 
 ```mermaid
 flowchart LR
-    subgraph "Phase 1: Flow Matching Distillation"
+    subgraph "Online Training (Default - No Caching Required)"
         direction TB
         P1_Data["Mixed Corpus<br/>Diverse text datasets"]
-        P1_Teacher["Teacher Qwen<br/>Layers 0-23"]
-        P1_Cache["Teacher Cache<br/>h_start, h_target, velocity"]
+        P1_Teacher["Teacher Qwen<br/>extract_teacher_targets()"]
         P1_Train["Train FlowMidblock<br/>Match layer 7 → 11 transport"]
-        P1_Obj["Objective:<br/>Velocity Loss (MSE)"]
+        P1_Obj["Objective:<br/>Velocity Loss (MSE) + CE/KL"]
         
         P1_Data --> P1_Teacher
-        P1_Teacher --> P1_Cache
-        P1_Cache --> P1_Train
+        P1_Teacher --> P1_Train
         P1_Train --> P1_Obj
     end
     
-    subgraph "Phase 2: End-to-End LLM Training"
-        direction TB
-        P2_Frozen["Frozen:<br/>Layers 0-7, 12-23, LM Head"]
-        P2_Trainable["Trainable:<br/>FlowMidblock (replaces 8-11)"]
-        P2_Data["Standard LM Data"]
-        P2_Loss["Loss:<br/>CE / KL / Perplexity"]
-        P2_Out["Train as Normal LLM"]
-        
-        P2_Frozen --> P2_Out
-        P2_Trainable --> P2_Out
-        P2_Data --> P2_Out
-        P2_Out --> P2_Loss
-    end
-    
-    Phase1["✓ Phase 1 Complete<br/>Flow module trained"] --> Phase2["Phase 2: Full LLM<br/>Fine-tuning"]
+    P1_Complete["✓ FlowMidblock Trained<br/>Online Mode"] --> P2_Inference["Inference:<br/>Variable T Steps"]
     
     style P1_Train fill:#4ecdc4,stroke:#333,stroke-width:2px
-    style P2_Trainable fill:#4ecdc4,stroke:#333,stroke-width:2px
-    style Phase1 fill:#95e1d3,stroke:#333,stroke-width:2px
+    style P1_Complete fill:#95e1d3,stroke:#333,stroke-width:2px
 ```
+
+**Key Change (April 2025):** The codebase now defaults to **online calculation mode** where teacher targets are extracted on-the-fly during training. This eliminates the need for large teacher-state caches and makes the workflow simpler and more disk-space friendly.
 
 ## Detailed Architecture
 
@@ -111,7 +96,7 @@ Output Logits
    - Outputs hidden states at layer 11 boundary
    - Uses ODE solvers (Euler) for the iterative process
 
-3. **Teacher Cache**: Pre-computed teacher hidden states and trajectory targets, enabling efficient distillation without loading the teacher during training.
+3. **Online Teacher Extraction**: Teacher targets are computed on-the-fly via `model.extract_teacher_targets()`, eliminating the need for pre-built caches.
 
 ### Loss Functions
 
@@ -119,6 +104,7 @@ Output Logits
 - **Endpoint Loss**: Matches final hidden states at span exit
 - **Trajectory Loss**: Matches intermediate teacher hidden states
 - **KL Divergence**: Matches output token distributions (optional)
+- **Cross-Entropy**: Standard language modeling loss (optional)
 
 ### Why Iterative?
 
@@ -126,107 +112,149 @@ Output Logits
 - **Variable T at Inference**: Same model can run at different speed/quality points
 - **Flow Matching**: Continuous-time formulation enables flexible step counts
 
-## What is the cache build?
+## Quick Start
 
-The cache build is the preprocessing step that runs the frozen teacher model once over the dataset and saves the teacher outputs to disk.
-
-In this project, `scripts/build_teacher_cache.py`:
-- loads the teacher model (`Qwen/Qwen3.5-0.8B` in the current v0 config)
-- loads/tokenizes the dataset
-- runs the teacher forward pass for each sample
-- extracts the hidden states around the replacement span
-- saves those outputs into `cache/...` as shard files plus metadata
-
-More specifically, each cached sample can contain:
-- `input_ids`
-- `attention_mask`
-- `h_start`: hidden state before the replacement span
-- `trajectory_targets`: teacher hidden states inside the span
-- `h_target`: hidden state after the span
-- `teacher_logits`: final teacher logits
-
-## Why do we build the cache first?
-
-The student is trained to match teacher behavior. Instead of running the full teacher model during every training step, we precompute and save the teacher targets offline.
-
-Benefits:
-- training is simpler
-- training can be faster
-- GPU memory pressure during training is lower
-- experiments become more reproducible
-
-Tradeoff:
-- cache generation can take a long time
-- cache files can become very large
-
-## Where does the cache go?
-
-The cache directory is controlled by the config file.
-
-Examples:
-- `configs/v0_onemotif.yaml` -> `./cache/tinystories_qwen_boundary_states`
-- `configs/v0_smoke_run.yaml` -> `./cache/tinystories_qwen_boundary_states_smoke`
-
-## How big is the cache expected to be?
-
-Short answer: yes, hidden-state tensors scale like `num_layers * seq_len * hidden_dim`, but in the current setup the largest tensor is actually the saved logits, which scale like `seq_len * vocab_size`.
-
-For the current v0 setup:
-- text hidden size = `1024`
-- replacement span = layers `8..11` -> span depth `4`
-- sequence length = `128`
-- vocab size = `248320`
-- cache build currently uses float32 for teacher outputs, so each float is `4 bytes`
-
-Per sample, the main cached tensors are approximately:
-- `h_start`: `[seq_len, hidden_dim]` -> `128 * 1024 * 4` bytes -> about `0.5 MiB`
-- `trajectory_targets`: `span_depth * [seq_len, hidden_dim]` -> `4 * 128 * 1024 * 4` bytes -> about `2.0 MiB`
-- `h_target`: `[seq_len, hidden_dim]` -> about `0.5 MiB`
-- `teacher_logits`: `[seq_len, vocab_size]` -> `128 * 248320 * 4` bytes -> about `121 MiB`
-
-So the rough total per sample is dominated by logits:
-- hidden states only: about `3 MiB / sample`
-- logits only: about `121 MiB / sample`
-- total: about `124 MiB / sample`
-
-That means for `20,000` samples the raw cache can become extremely large:
-- hidden states only: about `60 GiB`
-- logits only: about `2.3 TiB`
-- total rough upper bound: about `2.4 TiB`
-
-This is why the cache build can become unexpectedly huge. If cache size must be reduced, the first thing to reconsider is whether `teacher_logits` need to be stored for every token of every sample.
-
-## Step-by-step workflow
-
-1. Build teacher cache
-2. Train the student using the cached teacher outputs
-3. Evaluate the trained student
-
-## Commands
-
-Smoke run:
+### Prerequisites
 
 ```bash
 cd /home/hungphongtrn/Workspace/midflowlm
 source .venv/bin/activate
 pip install -r requirements.txt
-python scripts/build_teacher_cache.py --config configs/v0_smoke_run.yaml --limit 8 --overwrite
-python scripts/train_v0.py --config configs/v0_smoke_run.yaml --fast-dev-run
 ```
 
-Full v0 run:
+### Smoke Test (Fast Dev Run)
 
 ```bash
-cd /home/hungphongtrn/Workspace/midflowlm
-source .venv/bin/activate
-pip install -r requirements.txt
-python scripts/build_teacher_cache.py --config configs/v0_onemotif.yaml --overwrite
+# Quick test to verify everything works
+python scripts/train.py --config configs/v0_smoke_run.yaml --fast-dev-run
+```
+
+### Full Training
+
+```bash
+# Default: Online calculation mode (no caching required!)
+python scripts/train.py --config configs/v0_onemotif.yaml
+
+# With mixed corpus (diverse datasets)
+python scripts/train.py --config configs/v0_online_no_cache_mixed_ce_kl.yaml
+```
+
+### Resume from Checkpoint
+
+```bash
+python scripts/train.py --config configs/v0_onemotif.yaml --resume-from-checkpoint ./checkpoints/best.ckpt
+```
+
+## Configuration
+
+All configs now default to **online_no_cache** mode:
+
+```yaml
+# Teacher State Mode: online calculation is the default
+teacher_state:
+  mode: online_no_cache  # Options: online_no_cache, offline_cache (deprecated), online_write_through_cache (deprecated)
+
+# Teacher Cache: Disabled by default for disk-space efficiency
+teacher_cache:
+  enabled: false  # Set to true only if you specifically need caching
+  cache_dir: "./cache/my_cache"
+  store_logits: false
+  store_hidden_states: true
+```
+
+## What About Caching?
+
+⚠️ **Cache-based training is deprecated** as of April 2025. The old workflow required:
+1. Building a teacher cache (large disk space, slow preprocessing)
+2. Training from cached teacher outputs
+
+The new default is **online calculation** where teacher targets are extracted on-the-fly during training. This is:
+- **Simpler**: No cache building step
+- **More disk-space friendly**: No large cache files
+- **Just as effective**: Same training quality without preprocessing
+
+### Cache Size Reference (for comparison)
+
+If you choose to use caching (not recommended), be aware that cached hidden states can become very large:
+
+For Qwen3.5-0.8B with 20,000 samples:
+- Hidden states: ~60 GiB
+- Logits: ~2.3 TiB
+- **Total: ~2.4 TiB**
+
+This is why online calculation is now the default.
+
+### When to Use Caching (Deprecated)
+
+The `CachedTrainer` in `src.training.cached_trainer` and `scripts/train_v0.py` are kept for backward compatibility but emit deprecation warnings. Only use if:
+- You need exact reproducibility across training runs with frozen caches
+- You have abundant disk space and want to avoid teacher model overhead
+- You're running experiments where cache reuse is critical
+
+```bash
+# Deprecated - only use if specifically needed
+python scripts/train_v0.py --config configs/v0_onemotif.yaml  # Will show deprecation warning
+```
+
+## Project Structure
+
+```
+midflowlm/
+├── configs/              # YAML configuration files (all default to online mode)
+├── scripts/
+│   ├── train.py         # PRIMARY training script (online calculation)
+│   ├── train_v0.py      # DEPRECATED: old cache-based training
+│   ├── build_teacher_cache.py  # DEPRECATED: cache building
+│   └── eval_*.py        # Evaluation scripts
+├── src/
+│   ├── model/           # Model definitions (student, Qwen wrappers)
+│   ├── training/
+│   │   ├── trainer.py          # PRIMARY: OnlineNoCacheTrainer (now called Trainer)
+│   │   ├── cached_trainer.py # DEPRECATED: Cache-based trainer
+│   │   ├── losses.py         # Loss functions
+│   │   └── teacher_state.py  # Teacher state mode management
+│   └── data/            # Dataset loaders (tinystories, mixed corpus)
+└── tests/               # Test suite
+```
+
+## Key Design Principles
+
+1. **Online calculation first**: Teacher targets computed on-the-fly, no preprocessing
+2. **Disk-space friendly**: No mandatory cache files
+3. **Simple workflow**: Train directly without cache building
+4. **Backward compatible**: Old cache-based code still works (with warnings)
+
+## Testing
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run specific trainer tests
+pytest tests/test_online_no_cache_trainer.py -v
+
+# Run smoke tests
+pytest tests/test_train_smoke.py -v
+```
+
+## Migration from Cache-Based Training
+
+If you were using the old cache-based workflow:
+
+**Old (deprecated):**
+```bash
+python scripts/build_teacher_cache.py --config configs/v0_onemotif.yaml
 python scripts/train_v0.py --config configs/v0_onemotif.yaml
-python scripts/eval_v0.py --config configs/v0_onemotif.yaml
 ```
 
-## Important notes
+**New (recommended):**
+```bash
+# Just train - no cache building needed!
+python scripts/train.py --config configs/v0_onemotif.yaml
+```
 
-- Cache build is required before training.
-- Full cache generation may be very large and slow.
-- If training fails while loading cached shards, inspect the cache loader and shard format compatibility first.
+Update your configs:
+- Add `teacher_state.mode: online_no_cache`
+- Set `teacher_cache.enabled: false`
+
+See `AGENTS.md` for detailed development guidelines.

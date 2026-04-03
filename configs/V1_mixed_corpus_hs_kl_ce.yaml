@@ -1,10 +1,12 @@
 experiment_name: "v1_mixed_corpus_hs_kl_ce"
 
+# Teacher State Mode: online_no_cache is now the default (disk-space friendly)
 teacher_state:
-  mode: online_write_through_cache
+  mode: online_no_cache
 
+# Teacher Cache: Disabled by default. Set enabled: true only if needed.
 teacher_cache:
-  enabled: true
+  enabled: false
   cache_dir: "./cache/v1_mixed_corpus_hs_kl_ce"
   store_logits: true
   store_hidden_states: true

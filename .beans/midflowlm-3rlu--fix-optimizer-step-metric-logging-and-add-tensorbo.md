@@ -1,7 +1,7 @@
 ---
 # midflowlm-3rlu
 title: Fix optimizer-step metric logging and add TensorBoard inspection script
-status: in-progress
+status: scrapped
 type: task
 priority: high
 tags:
@@ -9,7 +9,7 @@ tags:
     - tensorboard
     - analysis
 created_at: 2026-03-26T15:44:43Z
-updated_at: 2026-03-28T08:32:36Z
+updated_at: 2026-04-03T14:00:04Z
 parent: midflowlm-g4k0
 ---
 

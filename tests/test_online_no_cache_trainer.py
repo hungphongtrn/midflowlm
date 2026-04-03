@@ -493,15 +493,15 @@ def test_gradient_accumulation_online_no_cache():
     assert trainer.accumulation_step == 0
 
 
-def test_base_trainer_still_has_teacher_model_param():
-    """Verify the base Trainer still has teacher_model parameter (no regression)."""
-    from src.training.trainer import Trainer
+def test_cached_trainer_has_teacher_model_param():
+    """Verify CachedTrainer has teacher_model parameter (deprecated but available)."""
+    from src.training.cached_trainer import CachedTrainer
     import inspect
 
-    sig = inspect.signature(Trainer.__init__)
+    sig = inspect.signature(CachedTrainer.__init__)
     param_names = list(sig.parameters.keys())
     assert "teacher_model" in param_names, (
-        "Base Trainer should still have teacher_model parameter"
+        "CachedTrainer should have teacher_model parameter"
     )
 
 

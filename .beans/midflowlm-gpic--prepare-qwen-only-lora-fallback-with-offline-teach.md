@@ -1,7 +1,7 @@
 ---
 # midflowlm-gpic
 title: Prepare Qwen-only LoRA fallback with offline teacher logits
-status: todo
+status: scrapped
 type: task
 priority: normal
 tags:
@@ -9,7 +9,7 @@ tags:
     - fallback
     - distillation
 created_at: 2026-03-26T15:45:40Z
-updated_at: 2026-03-26T15:45:40Z
+updated_at: 2026-04-03T14:00:12Z
 parent: midflowlm-g4k0
 blocked_by:
     - midflowlm-ynvr

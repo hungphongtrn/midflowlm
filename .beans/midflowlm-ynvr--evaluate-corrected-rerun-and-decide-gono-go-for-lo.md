@@ -1,14 +1,14 @@
 ---
 # midflowlm-ynvr
 title: Evaluate corrected rerun and decide go/no-go for LoRA fallback
-status: in-progress
+status: scrapped
 type: task
 priority: high
 tags:
     - evaluation
     - decision
 created_at: 2026-03-26T15:45:40Z
-updated_at: 2026-03-28T08:29:50Z
+updated_at: 2026-04-03T14:00:02Z
 parent: midflowlm-g4k0
 blocked_by:
     - midflowlm-hnnz
