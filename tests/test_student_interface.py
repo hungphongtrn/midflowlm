@@ -20,7 +20,7 @@ def test_a1_interface_compliance():
 def test_a2_interface_compliance():
     """Test A2 conforms to student family interface."""
     family = SharedRecurrentResidual(hidden_size=896, max_steps_T=8)
-    interface = StudentFamilyInterface(family, family_type="shared_recurrent")
+    interface = StudentFamilyInterface(family, family_type="shared_recurrent_residual")
 
     h_start = torch.randn(2, 64, 896)
 
@@ -33,7 +33,7 @@ def test_a2_interface_compliance():
 def test_interface_returns_dict_for_trajectory():
     """Test interface returns dict with endpoint_hidden and optionally trajectory_hidden."""
     family = SharedRecurrentResidual(hidden_size=896, max_steps_T=8)
-    interface = StudentFamilyInterface(family, family_type="shared_recurrent")
+    interface = StudentFamilyInterface(family, family_type="shared_recurrent_residual")
 
     h_start = torch.randn(2, 64, 896)
 
