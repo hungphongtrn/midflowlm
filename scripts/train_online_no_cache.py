@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import logging
+import os
 import random
 import sys
 import time
@@ -26,6 +27,16 @@ import torch
 import yaml
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
+# Force unbuffered output for live logging
+os.environ["PYTHONUNBUFFERED"] = "1"
+sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
+
+# SDPA (Scaled Dot Product Attention) is enabled by default for better performance
+# Only disable if experiencing CUDA hangs during training
+# torch.backends.cuda.enable_flash_sdp(False)
+# torch.backends.cuda.enable_mem_efficient_sdp(False)
+# torch.backends.cuda.enable_math_sdp(True)
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.model.student_qwen import FrozenQwenStudent
@@ -34,12 +45,130 @@ from src.training.online_no_cache_trainer import OnlineNoCacheTrainer
 from src.data.dataset_factory import get_experiment_dataloaders
 
 
-def setup_logging(log_level: str = "INFO") -> logging.Logger:
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+def setup_logging(
+    log_level: str = "INFO", log_dir: Optional[str] = None
+) -> logging.Logger:
+    """Setup logging with both console and file handlers.
+
+    Configures the root logger so that all modules (including trainers)
+    automatically log to both console and file with live streaming.
+
+    Args:
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
+        log_dir: Directory to save log files. If None, only console logging is used.
+
+    Returns:
+        Configured logger instance
+    """
+    # Configure the root logger so all child loggers inherit the settings
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level.upper()))
+
+    # Clear any existing handlers on root logger
+    root_logger.handlers = []
+
+    # Console handler with explicit flush for live output
+    class LineBufferedStreamHandler(logging.StreamHandler):
+        """StreamHandler that flushes after every emit for live output."""
+
+        def emit(self, record):
+            super().emit(record)
+            self.flush()
+
+    console_handler = LineBufferedStreamHandler(sys.stdout)
+    console_handler.setLevel(getattr(logging, log_level.upper()))
+    console_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
+
+    # File handler if log_dir is provided
+    if log_dir is not None:
+        log_path = Path(log_dir)
+        log_path.mkdir(parents=True, exist_ok=True)
+        log_file = log_path / "train.log"
+
+        file_handler = logging.FileHandler(log_file, mode="a")
+        file_handler.setLevel(getattr(logging, log_level.upper()))
+        file_formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)
+
+        # Also log to a separate error-only file
+        error_file = log_path / "error.log"
+        error_handler = logging.FileHandler(error_file, mode="a")
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(file_formatter)
+        root_logger.addHandler(error_handler)
+
+        root_logger.info(f"Logging to console and files: {log_file}, {error_file}")
+
+    # Return the module logger (which inherits from root)
+    return logging.getLogger(__name__)
+
+
+def load_config(config_path: str) -> dict:
+    """Setup logging with both console and file handlers.
+
+    Configures the root logger so that all modules (including trainers)
+    automatically log to both console and file.
+
+    Args:
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
+        log_dir: Directory to save log files. If None, only console logging is used.
+
+    Returns:
+        Configured logger instance
+    """
+    # Configure the root logger so all child loggers inherit the settings
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level.upper()))
+
+    # Clear any existing handlers on root logger
+    root_logger.handlers = []
+
+    # Console handler - line-buffered for live output
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(getattr(logging, log_level.upper()))
+    # Force line buffering by not using buffering
+    console_handler.flush = sys.stdout.flush
+    console_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
+
+    # File handler if log_dir is provided
+    if log_dir is not None:
+        log_path = Path(log_dir)
+        log_path.mkdir(parents=True, exist_ok=True)
+        log_file = log_path / "train.log"
+
+        file_handler = logging.FileHandler(log_file, mode="a")
+        file_handler.setLevel(getattr(logging, log_level.upper()))
+        file_formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)
+
+        # Also log to a separate error-only file
+        error_file = log_path / "error.log"
+        error_handler = logging.FileHandler(error_file, mode="a")
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(file_formatter)
+        root_logger.addHandler(error_handler)
+
+        root_logger.info(f"Logging to console and files: {log_file}, {error_file}")
+
+    # Return the module logger (which inherits from root)
     return logging.getLogger(__name__)
 
 
@@ -47,6 +176,43 @@ def load_config(config_path: str) -> dict:
     with open(config_path) as f:
         config = yaml.safe_load(f)
     return config
+
+
+def find_checkpoint_path(checkpoint_source: str) -> Optional[str]:
+    """Find checkpoint file to resume from.
+
+    Args:
+        checkpoint_source: Path to checkpoint file or directory
+
+    Returns:
+        Path to checkpoint file, or None if not found
+    """
+    if not checkpoint_source:
+        return None
+
+    path = Path(checkpoint_source)
+
+    # If it's a file, use it directly
+    if path.is_file():
+        return str(path)
+
+    # If it's a directory, look for checkpoint files
+    if path.is_dir():
+        # Priority: best.ckpt > last.ckpt > any .ckpt file
+        candidates = ["best.ckpt", "last.ckpt"]
+        for candidate in candidates:
+            ckpt_path = path / candidate
+            if ckpt_path.exists():
+                return str(ckpt_path)
+
+        # Find any .ckpt file
+        ckpt_files = list(path.glob("*.ckpt"))
+        if ckpt_files:
+            # Sort by modification time (most recent first)
+            ckpt_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            return str(ckpt_files[0])
+
+    return None
 
 
 def set_seed(seed: int) -> None:
@@ -152,12 +318,21 @@ def main():
         default=None,
         help="Resume from checkpoint path",
     )
+    parser.add_argument(
+        "--init-from-checkpoint",
+        type=str,
+        default=None,
+        help="Warm-start from checkpoint (loads model weights only, fresh optimizer/scheduler)",
+    )
     parser.add_argument("--log-level", type=str, default="INFO", help="Logging level")
 
     args = parser.parse_args()
 
     config = load_config(args.config)
-    logger = setup_logging(args.log_level)
+
+    # Get log directory from config
+    log_dir = config.get("logging", {}).get("log_dir")
+    logger = setup_logging(args.log_level, log_dir)
 
     logger.info(f"Loaded config from {args.config}")
     logger.info(f"Experiment: {config.get('experiment_name', 'unknown')}")
@@ -197,6 +372,35 @@ def main():
     param_summary = model.get_parameter_summary()
     logger.info(f"Model parameters: {param_summary}")
 
+    init_from_checkpoint = args.init_from_checkpoint
+    if not init_from_checkpoint:
+        init_from_checkpoint = config.get("train_loop", {}).get("init_from_checkpoint")
+
+    if init_from_checkpoint:
+        warmstart_path = find_checkpoint_path(init_from_checkpoint)
+        if warmstart_path:
+            logger.info("=" * 60)
+            logger.info(f"WARM-STARTING FROM CHECKPOINT (fresh optimizer/scheduler)")
+            logger.info(f"Loading model weights from: {warmstart_path}")
+            logger.info("Optimizer, scheduler, and global_step will be FRESH")
+            logger.info("=" * 60)
+            checkpoint = torch.load(
+                warmstart_path, map_location=device, weights_only=True
+            )
+            model.load_state_dict(checkpoint["model_state_dict"])
+            logger.info("Model weights loaded successfully for warm-start")
+            del checkpoint
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            import gc
+
+            gc.collect()
+            logger.info("GPU memory cache cleared after warm-start loading")
+        else:
+            logger.warning(
+                f"Could not find checkpoint for warm-start: {init_from_checkpoint}"
+            )
+
     logger.info("Creating loss function...")
     loss_fn = create_loss_function(config)
     loss_fn = loss_fn.to(device)
@@ -232,9 +436,36 @@ def main():
         val_dataloader=val_dataloader,
     )
 
-    if args.resume_from_checkpoint:
-        logger.info(f"Resuming from checkpoint: {args.resume_from_checkpoint}")
-        trainer.load_checkpoint(args.resume_from_checkpoint)
+    # Determine checkpoint to resume from
+    # Priority: CLI arg > config value > None
+    resume_source = args.resume_from_checkpoint
+    if not resume_source:
+        resume_source = config.get("train_loop", {}).get("resume_from_checkpoint")
+
+    checkpoint_path = find_checkpoint_path(resume_source)
+
+    if checkpoint_path:
+        logger.info("=" * 60)
+        logger.info(f"RESUMING TRAINING FROM CHECKPOINT")
+        logger.info(f"Checkpoint path: {checkpoint_path}")
+        logger.info(
+            f"Previous step: {trainer.global_step}, epoch: {trainer.current_epoch}"
+        )
+        logger.info("=" * 60)
+        trainer.load_checkpoint(checkpoint_path)
+        logger.info(
+            f"Resumed at step {trainer.global_step}, epoch {trainer.current_epoch + 1}"
+        )
+        # Clear cache and run garbage collection after loading checkpoint
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        import gc
+
+        gc.collect()
+        logger.info("GPU memory cache cleared after checkpoint loading")
+    elif resume_source:
+        logger.warning(f"Could not find checkpoint to resume from: {resume_source}")
 
     if args.fast_dev_run:
         logger.info("Running fast dev loop (1 train step, 1 val step)...")

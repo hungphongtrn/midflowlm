@@ -60,6 +60,7 @@ class OnlineNoCacheTrainer:
         self.global_step = 0
         self.current_epoch = 0
         self.accumulation_step = 0
+        self._just_validated = False
 
         self.optimizer_config = config.get("optimizer", {})
         self.scheduler_config = config.get("scheduler", {})
@@ -306,10 +307,12 @@ class OnlineNoCacheTrainer:
         if attention_mask is not None:
             attention_mask = attention_mask.to(self.device)
 
+        logger.debug(f"Extracting teacher targets for batch...")
         teacher_targets = self.model.extract_teacher_targets(
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
+        logger.debug(f"Teacher targets extracted successfully")
         h_start = teacher_targets["h_start"]
         h_target = teacher_targets["h_target"]
         velocity_target = teacher_targets["velocity_target"]
@@ -415,10 +418,9 @@ class OnlineNoCacheTrainer:
             if self.scheduler is not None:
                 self.scheduler.step()
 
-            # Store gradient norm for logging
             self._last_grad_norm = grad_norm
+            self._just_validated = False
         else:
-            # During accumulation, gradient norm is partial
             grad_norm = 0.0
             self._last_grad_norm = grad_norm
 
@@ -436,8 +438,11 @@ class OnlineNoCacheTrainer:
             metrics["t_mean"] = t.mean().item()
             metrics["t_std"] = t.std().item()
 
-        # Log to tensorboard if enabled
-        if self.use_tensorboard and self.tensorboard_writer is not None:
+        if (
+            self.accumulation_step == 0
+            and self.use_tensorboard
+            and self.tensorboard_writer is not None
+        ):
             self._log_to_tensorboard(metrics)
 
         return metrics
@@ -601,15 +606,26 @@ class OnlineNoCacheTrainer:
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Starting OnlineNoCache training for {max_epochs} epochs")
+        logger.info(
+            f"Initial state: global_step={self.global_step}, epoch={self.current_epoch}, accumulation_step={self.accumulation_step}"
+        )
 
         for epoch in range(self.current_epoch, max_epochs):
             self.current_epoch = epoch
             logger.info(f"Epoch {epoch + 1}/{max_epochs}")
+            logger.info(f"Starting epoch {epoch + 1} - waiting for first batch...")
 
             for batch_idx, batch in enumerate(self.train_dataloader):
+                if batch_idx == 0:
+                    logger.info(
+                        f"Received first batch of epoch {epoch + 1}, starting training steps..."
+                    )
                 metrics = self.train_step(batch)
 
-                if self.global_step % self.log_every_n_steps == 0:
+                if (
+                    self.accumulation_step == 0
+                    and self.global_step % self.log_every_n_steps == 0
+                ):
                     log_str = f"Step {self.global_step}: "
                     log_str += f"loss={metrics['loss']:.4f}, "
                     log_str += (
@@ -622,8 +638,13 @@ class OnlineNoCacheTrainer:
                     log_str += f"lr={metrics['lr']:.6f}"
                     logger.info(log_str)
 
-                if self.global_step % val_check_interval == 0 and self.global_step > 0:
+                if (
+                    self.global_step % val_check_interval == 0
+                    and self.global_step > 0
+                    and not self._just_validated
+                ):
                     val_metrics = self.validate()
+                    self._just_validated = True
                     log_str = f"Validation at step {self.global_step}: "
                     for key, value in val_metrics.items():
                         log_str += f"{key}={value:.4f} "
@@ -714,3 +735,35 @@ class OnlineNoCacheTrainer:
             f"Loaded checkpoint from {path} at step {self.global_step}, "
             f"epoch {self.current_epoch}, accumulation_step {self.accumulation_step}"
         )
+
+    def warm_start_from_checkpoint(self, path: Union[str, Path]) -> None:
+        """Warm-start from checkpoint by loading model weights only.
+
+        Unlike load_checkpoint(), this method does NOT restore:
+        - optimizer state (fresh optimizer)
+        - scheduler state (fresh scheduler)
+        - global_step (remains 0)
+        - current_epoch (remains 0)
+        - accumulation_step (remains 0)
+
+        This is useful when you want to initialize a training run from a pretrained
+        checkpoint but with a fresh optimizer (e.g., for ablation studies).
+
+        Args:
+            path: Path to checkpoint file
+        """
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
+
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+
+        logger.info(
+            f"Warm-started from checkpoint {path}: model weights loaded, "
+            f"optimizer/scheduler/global_step remain fresh"
+        )
+
+        del checkpoint
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()

@@ -4,11 +4,82 @@
 
 MidflowLM is an experimental project that replaces a span of transformer layers with a trainable iterative midblock that learns to match teacher hidden states through flow-based refinement.
 
-## Training Idea
+## Architecture Overview
 
-The core training paradigm is **iterative latent matching**: instead of learning a single forward pass through N layers, the student learns an iterative refinement process that can run for variable steps T while matching the teacher's trajectory through the same layer span.
+```mermaid
+flowchart TB
+    subgraph "Standard Qwen Architecture"
+        direction TB
+        Emb[Embeddings<br/>frozen]
+        L0_7["Layers 0-7<br/>frozen"]
+        L8_11["Layers 8-11<br/>replaced by FlowMidblock"]
+        L12_23["Layers 12-23<br/>frozen"]
+        LMHead[LM Head<br/>frozen]
+    end
+    
+    subgraph "Flow-Based Refinement (T Steps)"
+        direction TB
+        h_start["h_start<br/>from Layer 7"]
+        FM[FlowMidblock<br/>velocity predictor v_θ]
+        ODE["ODE Integration<br/>Euler steps"]
+        h_end["h_end<br/>to Layer 12"]
+    end
+    
+    Input[Input Text] --> Emb
+    Emb --> L0_7
+    L0_7 --> h_start
+    h_start --> FM
+    FM --> ODE
+    ODE --> h_end
+    h_end --> L12_23
+    L12_23 --> LMHead
+    LMHead --> Output[Output Logits]
+    
+    style L8_11 fill:#ff6b6b,stroke:#333,stroke-width:2px
+    style FM fill:#4ecdc4,stroke:#333,stroke-width:2px
+    style ODE fill:#45b7d1,stroke:#333,stroke-width:2px
+```
 
-### Architecture
+## Two-Phase Training Paradigm
+
+```mermaid
+flowchart LR
+    subgraph "Phase 1: Flow Matching Distillation"
+        direction TB
+        P1_Data["Mixed Corpus<br/>Diverse text datasets"]
+        P1_Teacher["Teacher Qwen<br/>Layers 0-23"]
+        P1_Cache["Teacher Cache<br/>h_start, h_target, velocity"]
+        P1_Train["Train FlowMidblock<br/>Match layer 7 → 11 transport"]
+        P1_Obj["Objective:<br/>Velocity Loss (MSE)"]
+        
+        P1_Data --> P1_Teacher
+        P1_Teacher --> P1_Cache
+        P1_Cache --> P1_Train
+        P1_Train --> P1_Obj
+    end
+    
+    subgraph "Phase 2: End-to-End LLM Training"
+        direction TB
+        P2_Frozen["Frozen:<br/>Layers 0-7, 12-23, LM Head"]
+        P2_Trainable["Trainable:<br/>FlowMidblock (replaces 8-11)"]
+        P2_Data["Standard LM Data"]
+        P2_Loss["Loss:<br/>CE / KL / Perplexity"]
+        P2_Out["Train as Normal LLM"]
+        
+        P2_Frozen --> P2_Out
+        P2_Trainable --> P2_Out
+        P2_Data --> P2_Out
+        P2_Out --> P2_Loss
+    end
+    
+    Phase1["✓ Phase 1 Complete<br/>Flow module trained"] --> Phase2["Phase 2: Full LLM<br/>Fine-tuning"]
+    
+    style P1_Train fill:#4ecdc4,stroke:#333,stroke-width:2px
+    style P2_Trainable fill:#4ecdc4,stroke:#333,stroke-width:2px
+    style Phase1 fill:#95e1d3,stroke:#333,stroke-width:2px
+```
+
+## Detailed Architecture
 
 ```
 Input Text
@@ -16,10 +87,14 @@ Input Text
 [Embeddings] (frozen)
     ↓
 [Lower Qwen Layers 0-7] (frozen)
-    ↓
-[IterativeMidblock 8-11] (trainable) ← Multiple refinement steps T
-    ↓
-[Upper Qwen Layers 12+] (frozen)
+    ↓ ← h_start (hidden state at layer 7 boundary)
+[FlowMidblock replacing layers 8-11] (trainable)
+    │   ↑
+    │   └── Continuous-time velocity predictor v_θ(h_t, t)
+    │   └── ODE solver: dh/dt = v_θ(h_t, t)
+    │   └── T refinement steps (configurable at inference)
+    ↓ → h_end (hidden state at layer 11 boundary)
+[Upper Qwen Layers 12-23] (frozen)
     ↓
 [LM Head] (frozen)
     ↓
@@ -30,8 +105,8 @@ Output Logits
 
 1. **Frozen Qwen Base**: The teacher and student share the same Qwen architecture, with only layers 8-11 being replaced.
 
-2. **IterativeMidblock**: A trainable flow-based module that:
-   - Takes hidden states at layer 8 boundary
+2. **FlowMidblock**: A trainable flow-based module that:
+   - Takes hidden states at layer 8 boundary (actually after layer 7)
    - Iteratively refines them through T steps (configurable at inference)
    - Outputs hidden states at layer 11 boundary
    - Uses ODE solvers (Euler) for the iterative process

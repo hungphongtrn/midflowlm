@@ -18,6 +18,7 @@ Usage:
 
 import argparse
 import logging
+import os
 import random
 import sys
 import json
@@ -28,6 +29,10 @@ from typing import Dict, Any, Optional
 import torch
 import yaml
 from transformers import AutoTokenizer
+
+# Force unbuffered output for live logging
+os.environ["PYTHONUNBUFFERED"] = "1"
+sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -345,33 +350,71 @@ def setup_logging(
 ) -> tuple:
     """Setup logging configuration.
 
+    Configures the root logger so that all modules (including trainers)
+    automatically log to both console and file with live streaming.
+
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
-        log_dir: Directory for structured JSON logs
+        log_dir: Directory for logs (both structured JSON and plain text)
         experiment_name: Experiment name for log file naming
 
     Returns:
         Tuple of (logger, structured_logger)
     """
-    # Setup console/file logging
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    # Configure the root logger so all child loggers inherit the settings
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level.upper()))
+
+    # Clear any existing handlers on root logger
+    root_logger.handlers = []
+
+    # Console handler with explicit flush for live output
+    class LineBufferedStreamHandler(logging.StreamHandler):
+        """StreamHandler that flushes after every emit for live output."""
+
+        def emit(self, record):
+            super().emit(record)
+            self.flush()
+
+    console_handler = LineBufferedStreamHandler(sys.stdout)
+    console_handler.setLevel(getattr(logging, log_level.upper()))
+    console_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
 
-    # Setup structured JSON logger for AI debugging
+    # Setup structured JSON logger and file logging
     structured_logger = None
     if log_dir:
         log_dir_path = Path(log_dir)
         log_dir_path.mkdir(parents=True, exist_ok=True)
 
+        # Plain text log file (train.log)
+        train_log_file = log_dir_path / "train.log"
+        file_handler = logging.FileHandler(train_log_file, mode="a")
+        file_handler.setLevel(getattr(logging, log_level.upper()))
+        file_handler.setFormatter(console_formatter)
+        root_logger.addHandler(file_handler)
+
+        # Error-only log file
+        error_log_file = log_dir_path / "error.log"
+        error_handler = logging.FileHandler(error_log_file, mode="a")
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(console_formatter)
+        root_logger.addHandler(error_handler)
+
+        # Structured JSON logger for AI debugging
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         experiment_part = experiment_name if experiment_name else "unknown"
-        log_file = log_dir_path / f"train_{experiment_part}_{timestamp}.jsonl"
+        json_log_file = log_dir_path / f"train_{experiment_part}_{timestamp}.jsonl"
+        structured_logger = StructuredTrainingLogger(json_log_file)
 
-        structured_logger = StructuredTrainingLogger(log_file)
-        logging.info(f"Structured logging to: {log_file}")
+        root_logger.info(
+            f"Logging to console and files: {train_log_file}, {error_log_file}"
+        )
+        root_logger.info(f"Structured logging to: {json_log_file}")
 
     return logging.getLogger(__name__), structured_logger
 

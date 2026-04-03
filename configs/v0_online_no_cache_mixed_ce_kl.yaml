@@ -32,7 +32,7 @@ data:
   batch_size: 1
   num_workers: 2
   pin_memory: true
-  persistent_workers: true
+  persistent_workers: false
   shuffle_seed: 1337
   mixture_components:
     - name: "fineweb_edu"
@@ -132,7 +132,7 @@ train_loop:
   val_check_interval: 250
   gradient_checkpointing: true
   checkpoint_dir: "./outputs/v0_online_no_cache_mixed_ce_kl/checkpoints"
-  resume_from_checkpoint: null
+  # resume_from_checkpoint: "./outputs/v0_online_no_cache_mixed_ce_kl/checkpoints"  # Uncomment to resume from checkpoint
 
 logging:
   log_dir: "./outputs/v0_online_no_cache_mixed_ce_kl/logs"
