@@ -16,6 +16,7 @@ from typing import Optional, List
 
 
 __all__ = [
+    "OneShotProjector",
     "SharedRecurrentResidual",
 ]
 
@@ -187,6 +188,80 @@ class RefinerBlock(nn.Module):
         hidden_states = residual + hidden_states
 
         return hidden_states
+
+
+# =============================================================================
+# Student Family A1: One-Shot Projector
+# =============================================================================
+
+
+class OneShotProjector(nn.Module):
+    """A1: Single shared block applied once (T=1).
+
+    This is the simplest trainable family that applies a single refiner block
+    once to transform h_start to h_end. It tests whether a single pass through
+    attention + MLP is sufficient without iteration.
+
+    Args:
+        hidden_size: Dimension of hidden states
+        num_heads: Number of attention heads
+        mlp_ratio: Ratio of MLP intermediate size to hidden size
+        dropout: Dropout probability
+    """
+
+    def __init__(
+        self,
+        hidden_size: int = 896,
+        num_heads: int = 8,
+        mlp_ratio: float = 4.0,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+
+        # Single block applied once
+        self.block = RefinerBlock(
+            hidden_size=hidden_size,
+            num_heads=num_heads,
+            mlp_ratio=mlp_ratio,
+            dropout=dropout,
+        )
+
+        # Output projection
+        self.output_norm = RMSNorm(hidden_size)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize weights."""
+
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+
+        self.apply(_basic_init)
+
+    def forward(
+        self,
+        h_start: torch.Tensor,
+        num_steps: int = 1,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Forward pass with single refinement.
+
+        Args:
+            h_start: Starting hidden states [batch_size, seq_len, hidden_size]
+            num_steps: Ignored for A1 (always 1)
+            attention_mask: Optional attention mask [batch_size, seq_len]
+
+        Returns:
+            Refined hidden states [batch_size, seq_len, hidden_size]
+        """
+        h = self.block(h_start, attention_mask)
+        h = self.output_norm(h)
+        return h
 
 
 # =============================================================================
