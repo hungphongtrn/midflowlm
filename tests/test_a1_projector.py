@@ -31,3 +31,14 @@ def test_one_shot_projector_is_residual_mlp():
         for m in projector.modules()
     )
     assert not has_transformer, "A1 should be simple MLP, not transformer"
+
+
+def test_gradient_flow():
+    """Verify gradients flow through the projector."""
+    projector = OneShotProjector(hidden_size=896)
+    h_start = torch.randn(2, 64, 896, requires_grad=True)
+    h_end_hat = projector(h_start)
+    loss = h_end_hat.sum()
+    loss.backward()
+    assert h_start.grad is not None
+    assert projector.fc1.weight.grad is not None

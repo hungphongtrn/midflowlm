@@ -14,6 +14,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
 
+__all__ = ["OneShotProjector"]
+
 
 class OneShotProjector(nn.Module):
     """A1: One-shot residual MLP projector.
@@ -46,37 +48,38 @@ class OneShotProjector(nn.Module):
         intermediate_size = int(hidden_size * mlp_ratio)
 
         # Simple two-layer MLP: hidden -> intermediate -> hidden
-        self.fc1 = nn.Linear(hidden_size, intermediate_size, bias=True)
-        self.fc2 = nn.Linear(intermediate_size, hidden_size, bias=True)
+        self.fc1 = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.fc2 = nn.Linear(intermediate_size, hidden_size, bias=False)
         self.dropout = nn.Dropout(dropout)
 
         self._init_weights()
 
     def _init_weights(self):
-        """Initialize weights with small standard deviation."""
-        nn.init.normal_(self.fc1.weight, mean=0.0, std=0.02)
-        nn.init.normal_(self.fc2.weight, mean=0.0, std=0.02)
-        if self.fc1.bias is not None:
-            nn.init.zeros_(self.fc1.bias)
-        if self.fc2.bias is not None:
-            nn.init.zeros_(self.fc2.bias)
+        """Initialize weights."""
 
-    def forward(self, h_start: torch.Tensor) -> torch.Tensor:
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+        self.apply(_basic_init)
+
+    def forward(
+        self, h_start: torch.Tensor, num_steps: Optional[int] = None
+    ) -> torch.Tensor:
         """Forward pass through residual MLP.
 
         Args:
-            h_start: Starting hidden states [batch_size, seq_len, hidden_size]
+            h_start: Starting hidden states [batch, seq, hidden]
+            num_steps: Ignored (A1 is one-shot only, for API compatibility)
 
         Returns:
-            Projected hidden states [batch_size, seq_len, hidden_size]
-            following: h_end_hat = h_start + g_theta(h_start)
+            Transformed hidden states [batch, seq, hidden]
         """
         # MLP transformation: g_theta(h_start)
         hidden = self.fc1(h_start)
         hidden = F.gelu(hidden)
-        hidden = self.dropout(hidden)
         hidden = self.fc2(hidden)
-        hidden = self.dropout(hidden)
+        hidden = self.dropout(hidden)  # Single dropout after transformation
 
         # Residual connection: h_start + g_theta(h_start)
         h_end_hat = h_start + hidden
