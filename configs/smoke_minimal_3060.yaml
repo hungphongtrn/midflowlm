@@ -1,8 +1,9 @@
-# Smoke test config for 3060 12GB
-# Uses batch_size=1, grad_accum=16 to fit in 12GB VRAM
-# Quick test: ~5 minutes to verify the full stack works
+# Smoke test config for 3060 - MINIMAL
+# Uses seq_len=32 for fast testing
+# Tests: batch_size=1, endpoint-only loss (no KL/Traj to save memory)
+# ~2-3 minutes to complete
 
-experiment_name: "v0_1_smoke_test_3060"
+experiment_name: "v0_1_smoke_minimal_3060"
 seed: 1337
 
 teacher_state:
@@ -10,9 +11,9 @@ teacher_state:
 
 teacher_cache:
   enabled: false
-  cache_dir: "./cache/smoke_3060"
-  store_logits: true
-  store_hidden_states: true
+  cache_dir: "./cache/smoke_minimal_3060"
+  store_logits: false
+  store_hidden_states: false
   overwrite: false
 
 model:
@@ -38,14 +39,13 @@ replacement_model:
 
 data:
   loader: "mixture"
-  seq_len: 1024
-  batch_size: 1  # 3060: reduced from 2
+  seq_len: 32  # VERY SHORT for smoke test
+  batch_size: 1
   num_workers: 0
   pin_memory: false
   persistent_workers: false
   shuffle_seed: 1337
   mixture_components:
-    # Minimal dataset - just FineWeb with tiny sample
     - name: "fineweb_edu_tiny"
       dataset_name: "HuggingFaceFW/fineweb-edu"
       dataset_config: "sample-10BT"
@@ -53,14 +53,14 @@ data:
       val_split: "train"
       format_type: "plain_text"
       text_field: "text"
-      train_samples: 50
-      val_samples: 10
+      train_samples: 20  # Very small
+      val_samples: 5
 
 loss:
   velocity_weight: 0.0
   endpoint_weight: 1.0
-  trajectory_weight: 0.0  # Disabled - requires intermediate supervision
-  kl_weight: 0.0  # Disabled for smoke test - causes OOM on 3060
+  trajectory_weight: 0.0
+  kl_weight: 0.0  # Disabled - saves memory
   teacher_logits_source: "online"
   ce_weight: 0.0
   mask_padding_tokens: true
@@ -75,30 +75,29 @@ optimizer:
 
 scheduler:
   name: "cosine_with_warmup"
-  warmup_steps: 10
+  warmup_steps: 5
 
 train_loop:
   precision: "bf16-mixed"
   max_epochs: 1
-  accumulate_grad_batches: 16  # 3060: increased from 8 to maintain effective batch
+  accumulate_grad_batches: 4  # Reduced for speed
   sample_continuous_time: true
   log_every_n_steps: 5
   val_check_interval: 10
   gradient_checkpointing: true
-  checkpoint_dir: "./outputs/smoke_3060/checkpoints"
+  checkpoint_dir: "./outputs/smoke_minimal_3060/checkpoints"
 
 logging:
-  log_dir: "./outputs/smoke_3060/logs"
+  log_dir: "./outputs/smoke_minimal_3060/logs"
   save_top_k: 1
   monitor: "val/total_loss"
   mode: "min"
 
 tensorboard:
   enabled: false
-  log_dir: "./outputs/smoke_3060/tensorboard"
 
 wandb:
-  enabled: true
-  project: "midflowlm-v0-1-smoke"
+  enabled: false  # Disabled for speed, enable if you want to see it
+  project: "midflowlm-smoke"
   entity: null
-  tags: ["smoke-test", "3060", "local"]
+  tags: ["smoke-test", "minimal", "3060"]
