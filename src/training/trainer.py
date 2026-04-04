@@ -393,6 +393,18 @@ class Trainer:
         velocity_target = teacher_targets.get("velocity_target")
         teacher_logits = teacher_targets.get("teacher_logits")
 
+        # Extract trajectory targets if available (for v0.1 trajectory loss)
+        trajectory_targets = None
+        if "trajectory_anchors" in teacher_targets:
+            # Convert dict of anchors to tensor format expected by loss function
+            # trajectory_anchors: {"h8": ..., "h9": ..., "h10": ..., "h11": ...}
+            # Need to stack into [batch, seq, num_layers, hidden]
+            anchors_dict = teacher_targets["trajectory_anchors"]
+            anchors_list = [anchors_dict[f"h{i}"] for i in range(8, 12)]
+            trajectory_targets = torch.stack(
+                anchors_list, dim=2
+            )  # [batch, seq, 4, hidden]
+
         # For CE loss, pass input_ids directly. The loss function will extract
         # targets as input_ids[:, 1:] and use logits[:, :-1] for predictions.
 
@@ -422,6 +434,7 @@ class Trainer:
                         "h_start": h_start,
                         "h_target": h_target,
                         "velocity_target": velocity_target,
+                        "trajectory_targets": trajectory_targets,
                         "teacher_logits": teacher_logits,
                         "labels": input_ids,
                     },
@@ -444,6 +457,7 @@ class Trainer:
                     "h_start": h_start,
                     "h_target": h_target,
                     "velocity_target": velocity_target,
+                    "trajectory_targets": trajectory_targets,
                     "teacher_logits": teacher_logits,
                     "labels": input_ids,
                 },
@@ -557,6 +571,13 @@ class Trainer:
         velocity_target = teacher_targets.get("velocity_target")
         teacher_logits = teacher_targets.get("teacher_logits")
 
+        # Extract trajectory targets if available (for v0.1 trajectory loss)
+        trajectory_targets = None
+        if "trajectory_anchors" in teacher_targets:
+            anchors_dict = teacher_targets["trajectory_anchors"]
+            anchors_list = [anchors_dict[f"h{i}"] for i in range(8, 12)]
+            trajectory_targets = torch.stack(anchors_list, dim=2)
+
         # For CE loss, pass input_ids directly. The loss function will extract
         # targets as input_ids[:, 1:] and use logits[:, :-1] for predictions.
 
@@ -587,6 +608,7 @@ class Trainer:
                             "h_start": h_start,
                             "h_target": h_target,
                             "velocity_target": velocity_target,
+                            "trajectory_targets": trajectory_targets,
                             "teacher_logits": teacher_logits,
                             "labels": input_ids,
                         },
@@ -609,6 +631,7 @@ class Trainer:
                         "h_start": h_start,
                         "h_target": h_target,
                         "velocity_target": velocity_target,
+                        "trajectory_targets": trajectory_targets,
                         "teacher_logits": teacher_logits,
                         "labels": input_ids,
                     },

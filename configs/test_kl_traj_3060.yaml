@@ -1,9 +1,7 @@
-# Smoke test config for 3060 - MINIMAL
-# Uses seq_len=32 for fast testing
-# Tests: batch_size=1, endpoint-only loss (no KL/Traj to save memory)
-# ~2-3 minutes to complete
+# Test if KL + Trajectory fits on 3060 12GB with seq_len=32
+# If this works, we'll update all smoke tests to use full losses
 
-experiment_name: "v0_1_smoke_minimal_3060"
+experiment_name: "test_kl_traj_3060"
 seed: 1337
 
 teacher_state:
@@ -11,14 +9,11 @@ teacher_state:
 
 teacher_cache:
   enabled: false
-  cache_dir: "./cache/smoke_minimal_3060"
-  store_logits: false
-  store_hidden_states: false
-  overwrite: false
+  store_logits: true
+  store_hidden_states: true
 
 model:
   name: "Qwen/Qwen3.5-0.8B"
-  revision: null
   max_steps_T: 8
   train_T_values: [2, 4]
   train_T_weights: [0.5, 0.5]
@@ -39,7 +34,7 @@ replacement_model:
 
 data:
   loader: "mixture"
-  seq_len: 32  # VERY SHORT for smoke test
+  seq_len: 32  # Short context
   batch_size: 1
   num_workers: 0
   pin_memory: false
@@ -53,14 +48,14 @@ data:
       val_split: "train"
       format_type: "plain_text"
       text_field: "text"
-      train_samples: 20  # Very small
+      train_samples: 10
       val_samples: 5
 
 loss:
   velocity_weight: 0.0
   endpoint_weight: 1.0
-  trajectory_weight: 1.0  # ENABLED - test trajectory supervision
-  kl_weight: 0.5  # ENABLED - test KL distillation
+  trajectory_weight: 1.0  # ENABLED
+  kl_weight: 0.5  # ENABLED
   teacher_logits_source: "online"
   ce_weight: 0.0
   mask_padding_tokens: true
@@ -80,15 +75,15 @@ scheduler:
 train_loop:
   precision: "bf16-mixed"
   max_epochs: 1
-  accumulate_grad_batches: 4  # Reduced for speed
+  accumulate_grad_batches: 4
   sample_continuous_time: true
   log_every_n_steps: 5
   val_check_interval: 10
   gradient_checkpointing: true
-  checkpoint_dir: "./outputs/smoke_minimal_3060/checkpoints"
+  checkpoint_dir: "./outputs/test_kl_traj/checkpoints"
 
 logging:
-  log_dir: "./outputs/smoke_minimal_3060/logs"
+  log_dir: "./outputs/test_kl_traj/logs"
   save_top_k: 1
   monitor: "val/total_loss"
   mode: "min"
@@ -97,7 +92,4 @@ tensorboard:
   enabled: false
 
 wandb:
-  enabled: false  # Disabled for speed, enable if you want to see it
-  project: "midflowlm-smoke"
-  entity: null
-  tags: ["smoke-test", "minimal", "3060"]
+  enabled: false
