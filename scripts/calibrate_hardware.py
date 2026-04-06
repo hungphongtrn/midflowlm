@@ -29,7 +29,7 @@ import yaml
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.model.student_qwen import create_frozen_qwen_student
+from src.model.student_qwen import FrozenQwenStudent
 from src.data.mixed_corpus import build_mixture_split_with_stats
 from src.utils.config_loader import load_config
 
@@ -98,7 +98,7 @@ def try_microbatch(
         model_config = config["model"]
         replacement_config = config["replacement_model"]
 
-        student_model = create_frozen_qwen_student(
+        student_model = FrozenQwenStudent(
             model_name=model_config["name"],
             revision=model_config.get("revision"),
             start_layer=replacement_config["start_layer"],
