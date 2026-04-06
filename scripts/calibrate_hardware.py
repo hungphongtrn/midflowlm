@@ -31,7 +31,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.model.student_qwen import FrozenQwenStudent
 from src.data.mixed_corpus import build_mixture_split_with_stats
-from src.utils.config_loader import load_config
+
+
+def load_config(config_path: str) -> dict:
+    """Load YAML config file."""
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    return config
 
 
 def get_gpu_memory_info() -> Dict[str, float]:
@@ -100,34 +106,23 @@ def try_microbatch(
 
         student_model = FrozenQwenStudent(
             model_name=model_config["name"],
-            revision=model_config.get("revision"),
             start_layer=replacement_config["start_layer"],
             end_layer=replacement_config["end_layer"],
             max_steps_T=model_config["max_steps_T"],
-            step_embedding=model_config.get("step_embedding", "discrete"),
-            architecture_mode=replacement_config.get(
-                "architecture_mode", "causal_hidden_refiner"
-            ),
-            depth=replacement_config.get("depth", 4),
-            mlp_ratio=replacement_config.get("mlp_ratio", 4.0),
-            use_qwen_causal_mask=replacement_config.get("use_qwen_causal_mask", True),
-            conditioning_mode=replacement_config.get(
-                "conditioning_mode", "timestep_plus_layer_boundary"
-            ),
-            reuse_qwen_modules=model_config.get("reuse_qwen_modules", True),
+            device=str(device),
             family=replacement_config.get("family", "flow_midblock"),
-            qkv_bias=replacement_config.get("qkv_bias", True),
         )
         student_model.to(device)
 
         # Enable gradient checkpointing if configured
         if config["train_loop"].get("gradient_checkpointing", False):
-            student_model.trainable_block.gradient_checkpointing = True
+            student_model.gradient_checkpointing_enable()
 
         # Create optimizer
         optimizer_config = config["optimizer"]
+        trainable_params = [p for p in student_model.parameters() if p.requires_grad]
         optimizer = torch.optim.AdamW(
-            student_model.trainable_parameters(),
+            trainable_params,
             lr=optimizer_config["learning_rate"],
             betas=tuple(optimizer_config.get("betas", [0.9, 0.95])),
             eps=optimizer_config.get("eps", 1e-8),
