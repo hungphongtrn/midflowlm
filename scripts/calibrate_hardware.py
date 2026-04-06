@@ -245,11 +245,7 @@ def try_microbatch(
             step_end = time.time()
             step_times.append(step_end - step_start)
 
-            # Clear cache periodically
-            if step % 2 == 0:
-                torch.cuda.empty_cache()
-
-        # Get peak memory
+        # Get peak memory after all steps complete (don't clear cache before measuring!)
         peak_vram = get_peak_memory_gb()
         avg_step_time = sum(step_times) / len(step_times) if step_times else 0
         tokens_per_sec = (
