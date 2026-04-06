@@ -309,7 +309,7 @@ def find_optimal_profile(
     print("Phase 1: Finding max stable microbatch (grad_accum=1)...")
     stable_microbatches = []
 
-    for microbatch in range(1, 9):  # Test up to 8
+    for microbatch in range(1, 16):  # Test up to 16
         print(f"\nTesting microbatch_size={microbatch}, grad_accum=1...")
         result = try_microbatch(
             config, microbatch, gradient_accumulation=1, max_steps=3
