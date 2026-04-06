@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 import yaml
+from transformers import AutoTokenizer
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -131,9 +132,19 @@ def try_microbatch(
 
         # Create a minimal dataloader
         data_config = config["data"]
+
+        # Load tokenizer separately (not stored in model)
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_config["name"],
+            revision=model_config.get("revision"),
+            trust_remote_code=True,
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
         train_dataset, _ = build_mixture_split_with_stats(
             components_config=data_config["mixture_components"],
-            tokenizer=student_model.tokenizer,
+            tokenizer=tokenizer,
             seq_len=data_config["seq_len"],
             split="train",
             shuffle_seed=data_config.get("shuffle_seed", 1337),
