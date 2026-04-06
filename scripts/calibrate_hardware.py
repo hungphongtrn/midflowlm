@@ -20,6 +20,7 @@ import json
 import time
 import os
 import sys
+import multiprocessing
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from types import SimpleNamespace
@@ -27,6 +28,12 @@ from types import SimpleNamespace
 import torch
 import yaml
 from transformers import AutoTokenizer
+
+# Set environment variables for maximum CPU utilization
+os.environ["OMP_NUM_THREADS"] = str(os.cpu_count())
+os.environ["MKL_NUM_THREADS"] = str(os.cpu_count())
+os.environ["HF_DATASETS_PARALLELISM"] = "true"
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -159,12 +166,19 @@ def try_microbatch(
             seq_len=data_config["seq_len"],
         )
 
+        # Determine optimal workers for this machine
+        cpu_count = multiprocessing.cpu_count()
+        num_gpus = max(1, torch.cuda.device_count())
+        optimal_workers = max(2, (cpu_count - 2) // num_gpus)
+
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=microbatch_size,
             shuffle=False,
-            num_workers=0,  # Use 0 for calibration to avoid multiprocessing issues
-            pin_memory=data_config.get("pin_memory", False),
+            num_workers=optimal_workers,
+            pin_memory=True,
+            prefetch_factor=4,
+            persistent_workers=True,
         )
 
         # Training loop for calibration
