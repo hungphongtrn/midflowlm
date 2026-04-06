@@ -1,18 +1,19 @@
 #!/bin/bash
-# run_matrix.sh - Enhanced runner for v0.1 experiment matrix on 3x3090s
+# run_matrix.sh - Enhanced runner for v0.1 experiment matrix
 # Usage: 
-#   bash scripts/run_matrix.sh              # Run all experiments sequentially
-#   bash scripts/run_matrix.sh --parallel   # Run on all 3 GPUs in parallel (default for 3090s)
+#   bash scripts/run_matrix.sh              # Run on all GPUs in parallel (auto-detected)
+#   bash scripts/run_matrix.sh --parallel   # Same as default
+#   bash scripts/run_matrix.sh --sequential # Run one at a time
 #   bash scripts/run_matrix.sh --resume     # Resume interrupted experiments
-#   CUDA_VISIBLE_DEVICES=0,1,2 bash scripts/run_matrix.sh --parallel  # Specific GPUs
+#   CUDA_VISIBLE_DEVICES=0,1 bash scripts/run_matrix.sh  # Use specific GPUs
 
 # Configuration
 CONFIG_DIR="configs/v0_1_matrix"
 LOG_DIR="logs/matrix_$(date +%Y%m%d_%H%M%S)"
 STATUS_DIR=".experiment_status"
 STATUS_FILE="$STATUS_DIR/status_$(date +%Y%m%d).log"
-PARALLEL=1  # Default to parallel for 3090s
-MAX_JOBS=3
+PARALLEL=1  # Default to parallel mode
+MAX_JOBS=""  # Will be set to NUM_GPUS after detection (empty = auto)
 RESUME=0
 DRY_RUN=0
 START_TIME=$(date +%s)
@@ -56,20 +57,23 @@ while [[ $# -gt 0 ]]; do
         --help|-h)
             echo "Usage: bash scripts/run_matrix.sh [OPTIONS]"
             echo ""
+            echo "Auto-detects available GPUs and runs experiments in parallel by default."
+            echo ""
             echo "Options:"
             echo "  --parallel        Run experiments across all GPUs in parallel (default)"
             echo "  --sequential      Run experiments one at a time"
-            echo "  --max-jobs N      Limit parallel jobs to N (default: 3 for 3x3090s)"
+            echo "  --max-jobs N      Limit parallel jobs to N (default: auto = num GPUs)"
             echo "  --resume          Resume from previous run (skip completed)"
             echo "  --dry-run         Show what would be run without executing"
             echo "  --config-dir DIR  Use different config directory"
             echo "  --help            Show this help"
             echo ""
             echo "Examples:"
-            echo "  bash scripts/run_matrix.sh                    # Parallel on all GPUs"
+            echo "  bash scripts/run_matrix.sh                    # Auto-detect GPUs, run parallel"
             echo "  bash scripts/run_matrix.sh --sequential       # One at a time"
+            echo "  bash scripts/run_matrix.sh --max-jobs 2       # Limit to 2 parallel jobs"
             echo "  bash scripts/run_matrix.sh --resume           # Continue after crash"
-            echo "  bash scripts/run_matrix.sh --dry-run          # Preview only"
+            echo "  CUDA_VISIBLE_DEVICES=0,1 bash scripts/run_matrix.sh  # Use only GPUs 0,1"
             exit 0
             ;;
         *)
@@ -93,9 +97,24 @@ if [ $TOTAL -eq 0 ]; then
     exit 1
 fi
 
+# Detect GPUs early (needed for auto-configuring MAX_JOBS)
+NUM_GPUS=$(python3 -c "import torch; print(torch.cuda.device_count())" 2>/dev/null || echo "0")
+if [ "$NUM_GPUS" = "0" ]; then
+    echo -e "${YELLOW}WARNING: No GPUs detected!${NC}"
+    echo "  Training will be extremely slow on CPU."
+    echo "  Set CUDA_VISIBLE_DEVICES if GPUs are available."
+    echo ""
+    NUM_GPUS=1  # Fallback
+fi
+
+# Set MAX_JOBS to NUM_GPUS if not explicitly provided
+if [ -z "$MAX_JOBS" ]; then
+    MAX_JOBS=$NUM_GPUS
+fi
+
 # Header
 echo -e "${CYAN}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║     MidflowLM v0.1 Experiment Matrix Runner (3090s)        ║${NC}"
+echo -e "${CYAN}║        MidflowLM v0.1 Experiment Matrix Runner           ║${NC}"
 echo -e "${CYAN}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${BLUE}Configuration:${NC}"
@@ -103,25 +122,21 @@ echo "  Total experiments: $TOTAL"
 echo "  Config directory: $CONFIG_DIR"
 echo "  Log directory: $LOG_DIR"
 echo "  Status file: $STATUS_FILE"
+echo "  GPUs detected: $NUM_GPUS"
 echo -n "  Mode: "
 if [ $PARALLEL -eq 1 ]; then
-    echo -e "${GREEN}Parallel${NC} (max $MAX_JOBS jobs)"
+    echo -e "${GREEN}Parallel${NC} (max $MAX_JOBS concurrent jobs)"
 else
     echo -e "${YELLOW}Sequential${NC}"
 fi
 echo ""
 
-# Detect GPUs
-NUM_GPUS=$(python3 -c "import torch; print(torch.cuda.device_count())" 2>/dev/null || echo "0")
-if [ "$NUM_GPUS" = "0" ]; then
-    echo -e "${RED}WARNING: No GPUs detected!${NC}"
-    echo "  Training will be extremely slow on CPU."
-    echo "  Set CUDA_VISIBLE_DEVICES if GPUs are available."
+# Show auto-configuration notice
+if [ -z "$MAX_JOBS" ] && [ $PARALLEL -eq 1 ]; then
+    echo -e "${BLUE}Auto-configured: MAX_JOBS=$MAX_JOBS (matching GPU count)${NC}"
+    echo "  Use --max-jobs N to override"
     echo ""
-    NUM_GPUS=1  # Fallback
 fi
-echo -e "${GREEN}GPUs detected: $NUM_GPUS${NC}"
-echo ""
 
 # Detect CPU cores and set optimal parallelism
 NUM_CPUS=$(nproc 2>/dev/null || echo "8")
