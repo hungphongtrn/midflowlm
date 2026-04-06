@@ -39,7 +39,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.model.student_qwen import FrozenQwenStudent
-from src.data.mixed_corpus import build_mixture_split_with_stats
+from src.data.mixed_corpus import build_mixture_split_with_stats, tokenize_function
 
 
 def load_config(config_path: str) -> dict:
@@ -165,6 +165,21 @@ def try_microbatch(
             tokenizer=tokenizer,
             seq_len=data_config["seq_len"],
         )
+
+        # Tokenize the dataset
+        tokenize_fn = lambda examples: tokenize_function(
+            examples,
+            tokenizer=tokenizer,
+            seq_len=data_config["seq_len"],
+        )
+
+        train_dataset = train_dataset.map(
+            tokenize_fn,
+            batched=True,
+            remove_columns=train_dataset.column_names,
+            desc="Tokenizing dataset",
+        )
+        train_dataset.set_format(type="torch", columns=["input_ids", "attention_mask"])
 
         # Determine optimal workers for this machine
         cpu_count = multiprocessing.cpu_count()
