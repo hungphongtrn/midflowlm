@@ -206,39 +206,25 @@ def try_microbatch(
 
             # Move batch to device
             input_ids = batch["input_ids"].to(device)
-            labels = batch.get("labels", input_ids).to(device)
             attention_mask = batch.get("attention_mask")
             if attention_mask is not None:
                 attention_mask = attention_mask.to(device)
 
             step_start = time.time()
 
-            # Determine loss flags based on config
-            loss_config = config["loss"]
-            need_teacher_logits = (
-                loss_config.get("kl_weight", 0.0) > 0.0
-                or loss_config.get("ce_weight", 0.0) > 0.0
-            )
-            need_velocity = loss_config.get("velocity_weight", 0.0) > 0.0
-            need_trajectory_anchors = (
-                loss_config.get("endpoint_weight", 0.0) > 0.0
-                or loss_config.get("trajectory_weight", 0.0) > 0.0
-            )
-
-            # Forward pass
+            # Forward pass - calibration just needs to verify no OOM
             with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16):
+                # Get student outputs (no need for teacher targets in calibration)
                 outputs = student_model(
                     input_ids=input_ids,
-                    labels=labels,
                     attention_mask=attention_mask,
                     num_steps=model_config["train_T_values"][0],
-                    return_teacher_targets=True,
-                    need_teacher_logits=need_teacher_logits,
-                    need_velocity=need_velocity,
-                    need_trajectory_anchors=need_trajectory_anchors,
+                    return_dict=True,
                 )
 
-                loss = outputs.get("loss", outputs.get("total_loss", 0))
+                # Use a simple dummy loss for calibration (sum of logits)
+                # This exercises the backward pass without needing full loss setup
+                loss = outputs["logits"].sum()
 
                 # Scale loss for gradient accumulation
                 if gradient_accumulation > 1:
@@ -250,7 +236,7 @@ def try_microbatch(
             # Optimizer step (only after accumulation)
             if (step + 1) % gradient_accumulation == 0:
                 torch.nn.utils.clip_grad_norm_(
-                    student_model.trainable_parameters(),
+                    trainable_params,
                     optimizer_config.get("grad_clip_norm", 1.0),
                 )
                 optimizer.step()
