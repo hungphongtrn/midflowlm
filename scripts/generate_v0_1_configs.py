@@ -30,7 +30,7 @@ print(
 # Hardware profile (auto-optimized for available CPUs)
 HARDWARE_PROFILE = {
     "seq_len": 1024,
-    "batch_size": 2,  # microbatch from calibrated profile
+    "batch_size": 3,  # microbatch = 3
     "num_workers": OPTIMAL_WORKERS,  # Auto-calculated: (cores - 2) / 3 GPUs
     "pin_memory": True,  # Enable for GPU training
     "persistent_workers": True,  # Keep workers alive between epochs
@@ -40,7 +40,7 @@ HARDWARE_PROFILE = {
 # Training settings (fixed for all experiments)
 TRAINING_DEFAULTS = {
     "max_epochs": 3,
-    "accumulate_grad_batches": 8,  # from calibrated profile
+    "accumulate_grad_batches": 5,  # grad accum = 5 (3*5=15 effective batch)
     "sample_continuous_time": True,
     "log_every_n_steps": 10,
     "val_check_interval": 250,
@@ -651,9 +651,9 @@ def main():
         f.write("## Hardware Profile\n\n")
         f.write("All configs use the same hardware profile:\n")
         f.write("- seq_len: 1024\n")
-        f.write("- batch_size: 2 (microbatch)\n")
-        f.write("- accumulate_grad_batches: 8\n")
-        f.write("- effective_batch_size: 16\n")
+        f.write("- batch_size: 3 (microbatch)\n")
+        f.write("- accumulate_grad_batches: 5\n")
+        f.write("- effective_batch_size: 15\n")
         f.write("- precision: bf16-mixed\n")
         f.write("- gradient_checkpointing: true\n\n")
         f.write("See `profiles/v0_1_3090_profile.json` for details.\n")

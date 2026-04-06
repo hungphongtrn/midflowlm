@@ -49,7 +49,7 @@ replacement_model:
 data:
   loader: mixture
   seq_len: 1024
-  batch_size: 2
+  batch_size: 3
   num_workers: 4
   pin_memory: true
   persistent_workers: true
@@ -144,7 +144,7 @@ scheduler:
   warmup_steps: 100
 train_loop:
   max_epochs: 3
-  accumulate_grad_batches: 8
+  accumulate_grad_batches: 5
   sample_continuous_time: true
   log_every_n_steps: 10
   val_check_interval: 250

@@ -32,9 +32,9 @@ python scripts/generate_v0_1_configs.py
 
 All configs use the same hardware profile:
 - seq_len: 1024
-- batch_size: 2 (microbatch)
-- accumulate_grad_batches: 8
-- effective_batch_size: 16
+- batch_size: 3 (microbatch)
+- accumulate_grad_batches: 5
+- effective_batch_size: 15
 - precision: bf16-mixed
 - gradient_checkpointing: true
 
