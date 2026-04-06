@@ -357,6 +357,9 @@ def get_mixed_corpus_dataloaders(
         pin_memory=data_config.pin_memory,
         persistent_workers=data_config.persistent_workers
         and data_config.num_workers > 0,
+        prefetch_factor=getattr(data_config, "prefetch_factor", 2)
+        if data_config.num_workers > 0
+        else None,
     )
 
     dataloaders["val"] = DataLoader(
@@ -367,6 +370,9 @@ def get_mixed_corpus_dataloaders(
         pin_memory=data_config.pin_memory,
         persistent_workers=data_config.persistent_workers
         and data_config.num_workers > 0,
+        prefetch_factor=getattr(data_config, "prefetch_factor", 2)
+        if data_config.num_workers > 0
+        else None,
     )
 
     return dataloaders

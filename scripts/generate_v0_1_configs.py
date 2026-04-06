@@ -10,19 +10,31 @@ This creates all P1/P2/P3/P4 experiment configs in configs/v0_1_matrix/
 
 import os
 import yaml
+import multiprocessing
 from pathlib import Path
 
 # Constants
 BASE_DIR = Path(__file__).parent.parent
 CONFIGS_DIR = BASE_DIR / "configs" / "v0_1_matrix"
 
-# Hardware profile (fixed for all experiments)
+# Auto-detect optimal workers based on CPU cores
+# Formula: Leave 2 cores for system, distribute rest among parallel experiments
+CPU_COUNT = multiprocessing.cpu_count()
+NUM_GPUS = 3  # Default for 3090 setup
+OPTIMAL_WORKERS = max(2, (CPU_COUNT - 2) // NUM_GPUS)  # Leave 2 cores for system
+
+print(
+    f"Detected {CPU_COUNT} CPU cores, configuring {OPTIMAL_WORKERS} dataloader workers per experiment"
+)
+
+# Hardware profile (auto-optimized for available CPUs)
 HARDWARE_PROFILE = {
     "seq_len": 1024,
     "batch_size": 2,  # microbatch from calibrated profile
-    "num_workers": 2,
-    "pin_memory": True,
-    "persistent_workers": False,
+    "num_workers": OPTIMAL_WORKERS,  # Auto-calculated: (cores - 2) / 3 GPUs
+    "pin_memory": True,  # Enable for GPU training
+    "persistent_workers": True,  # Keep workers alive between epochs
+    "prefetch_factor": 4,  # Prefetch 4 batches per worker
 }
 
 # Training settings (fixed for all experiments)
@@ -241,6 +253,7 @@ def build_config(
             "num_workers": HARDWARE_PROFILE["num_workers"],
             "pin_memory": HARDWARE_PROFILE["pin_memory"],
             "persistent_workers": HARDWARE_PROFILE["persistent_workers"],
+            "prefetch_factor": HARDWARE_PROFILE["prefetch_factor"],
             "shuffle_seed": shuffle_seed,
             "mixture_components": mixture_components,
         },

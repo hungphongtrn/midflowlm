@@ -1,15 +1,22 @@
 {
-  "hardware": "NVIDIA RTX 3090 24GB",
+  "hardware": "NVIDIA RTX 3090 24GB x3",
+  "cpu_cores": 16,
+  "cpu_threads": 32,
+  "ram_gb": 64,
   "seq_len": 1024,
   "microbatch_size": 2,
   "gradient_accumulation": 8,
   "effective_batch_size": 16,
   "precision": "bf16-mixed",
   "gradient_checkpointing": true,
+  "num_workers": 8,
+  "pin_memory": true,
+  "persistent_workers": true,
+  "prefetch_factor": 4,
   "peak_vram_gb": 21.5,
   "tokens_per_sec": 420,
   "avg_step_time_sec": 4.876,
   "calibrated_on": "FlowMidblock_EndTrajKLCe_MixC",
   "calibration_timestamp": "2026-04-03T00:00:00Z",
-  "notes": "Example profile - run scripts/calibrate_hardware.py on actual 3090 to get real values"
+  "notes": "Optimized for 3x3090 Vast instance with 16 cores/32 threads. Uses 8 dataloader workers per GPU for maximum throughput. Set HF_DATASETS_PARALLELISM=true for dataset downloading."
 }

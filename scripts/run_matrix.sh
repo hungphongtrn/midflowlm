@@ -123,6 +123,36 @@ fi
 echo -e "${GREEN}GPUs detected: $NUM_GPUS${NC}"
 echo ""
 
+# Detect CPU cores and set optimal parallelism
+NUM_CPUS=$(nproc 2>/dev/null || echo "8")
+CPU_THREADS=$(python3 -c "import os; print(os.cpu_count())" 2>/dev/null || echo "$NUM_CPUS")
+
+# Set environment variables for maximum parallelism
+echo -e "${BLUE}Optimizing for $CPU_THREADS CPU threads...${NC}"
+
+# HuggingFace Datasets - enable parallel downloading/processing
+export HF_DATASETS_PARALLELISM=true
+export HF_DATASETS_DOWNLOAD_PARALLELISM=8
+export HF_DATASETS_DOWNLOAD_CONCURRENCY=8
+
+# Tokenizers - enable parallel processing
+export TOKENIZERS_PARALLELISM=true
+
+# PyTorch settings
+export OMP_NUM_THREADS=$((CPU_THREADS / NUM_GPUS))
+export MKL_NUM_THREADS=$((CPU_THREADS / NUM_GPUS))
+
+# HuggingFace cache locations (use /tmp for faster SSD access if available)
+if [ -d "/workspace" ]; then
+    export HF_HOME=/workspace/.cache/huggingface
+    export HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
+fi
+
+echo "  HF_DATASETS_PARALLELISM=$HF_DATASETS_PARALLELISM"
+echo "  TOKENIZERS_PARALLELISM=$TOKENIZERS_PARALLELISM"
+echo "  OMP_NUM_THREADS=$OMP_NUM_THREADS (per process)"
+echo ""
+
 # Check if already running
 if [ -f ".runner_lock" ]; then
     PID=$(cat .runner_lock 2>/dev/null || echo "")
