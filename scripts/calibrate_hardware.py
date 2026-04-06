@@ -22,6 +22,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from types import SimpleNamespace
 
 import torch
 import yaml
@@ -142,13 +143,20 @@ def try_microbatch(
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
+        # Create config namespace for build_mixture_split_with_stats
+        config_ns = SimpleNamespace(
+            data=SimpleNamespace(
+                mixture_components=data_config["mixture_components"],
+                seq_len=data_config["seq_len"],
+                shuffle_seed=data_config.get("shuffle_seed", 1337),
+            )
+        )
+
         train_dataset, _ = build_mixture_split_with_stats(
-            components_config=data_config["mixture_components"],
+            config=config_ns,
+            split="train",
             tokenizer=tokenizer,
             seq_len=data_config["seq_len"],
-            split="train",
-            shuffle_seed=data_config.get("shuffle_seed", 1337),
-            max_samples=100,  # Small sample for calibration
         )
 
         train_loader = torch.utils.data.DataLoader(
