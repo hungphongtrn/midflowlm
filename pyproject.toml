@@ -1,0 +1,36 @@
+[project]
+name = "midflowlm"
+version = "0.1.0"
+description = "Iterative latent matching / distillation for language models"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2.0",
+    "transformers>=4.57.0",
+    "datasets>=2.18.0",
+    "torchmetrics>=1.4.0",
+    "torchdiffeq>=0.2.5",
+    "einops>=0.8.0",
+    "pyyaml>=6.0",
+    "safetensors>=0.4.0",
+    "numpy>=1.26.0",
+    "tqdm>=4.65.0",
+    "accelerate>=0.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+default-groups = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

@@ -58,3 +58,8 @@ Repository working rules for Hermes and other coding agents.
 - Verify checkpoint save/load
 - Verify one batch forward pass and one optimizer step
 - Record any library/API assumptions in docs
+
+### IMPORTANT: DO NOT INSTALL ACTUAL PACKAGES ON THIS DEV MACHINE. To add packages, use uv add <package> --no-sync
+
+### IMPORTANT: DO NOT BUILD THE PACKAGE
+This project uses editable/development mode only. Never run `uv sync`, `pip install -e .`, or any package build commands. Dependencies are managed via requirements.txt and pyproject.toml for documentation only.
