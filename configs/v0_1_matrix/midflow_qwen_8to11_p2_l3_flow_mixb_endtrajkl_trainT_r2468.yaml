@@ -49,7 +49,7 @@ replacement_model:
 data:
   loader: mixture
   seq_len: 1024
-  batch_size: 3
+  batch_size: 2
   num_workers: 4
   pin_memory: true
   persistent_workers: true
@@ -108,21 +108,21 @@ logging:
   save_top_k: 2
   monitor: val/total_loss
   mode: min
+  wandb:
+    enabled: true
+    project: midflowlm-v0-1
+    entity: null
+    tags:
+    - v0.1
+    - p2
+    - l3
+    - loss
+    - end+traj+kl
+    - mix-b
 tensorboard:
   enabled: true
   log_dir: ./outputs/midflow_qwen_8to11_p2_l3_flow_mixb_endtrajkl_trainT_r2468/tensorboard
   log_every_n_steps: 10
-wandb:
-  enabled: true
-  project: midflowlm-v0-1
-  entity: null
-  tags:
-  - v0.1
-  - p2
-  - l3
-  - loss
-  - end+traj+kl
-  - mix-b
 eval:
   eval_T_values:
   - 1
