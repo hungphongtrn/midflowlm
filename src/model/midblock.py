@@ -654,7 +654,7 @@ class FlowMidblock(nn.Module):
         )
 
         # Ensure dtype matches projection layer weights for mixed precision
-        features = features.to(self.velocity_proj.weight.dtype)
+        features = features.to(self.velocity_proj[1].weight.dtype)
         # Project to velocity prediction
         velocity = self.velocity_proj(features)
 
