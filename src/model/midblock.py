@@ -643,6 +643,8 @@ class FlowMidblock(nn.Module):
             time_features = time_features.unsqueeze(1).expand(-1, seq_len, -1)
             # Combine with conditioned hidden states
             combined = torch.cat([conditioned, time_features], dim=-1)
+            # Ensure dtype matches projection layer weights for mixed precision
+            combined = combined.to(self.time_proj.weight.dtype)
             conditioned = self.time_proj(combined)
 
         # Apply refiner block (computes features for velocity)
@@ -651,6 +653,8 @@ class FlowMidblock(nn.Module):
             attention_mask=attention_mask if self.use_causal_mask else None,
         )
 
+        # Ensure dtype matches projection layer weights for mixed precision
+        features = features.to(self.velocity_proj.weight.dtype)
         # Project to velocity prediction
         velocity = self.velocity_proj(features)
 

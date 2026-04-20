@@ -291,6 +291,8 @@ class BoundaryConditioningAdapter(nn.Module):
         if self.conditioning_mode == "concat":
             # Concatenate and project
             combined = torch.cat([hidden_states, h_start], dim=-1)
+            # Ensure dtype matches projection layer weights for mixed precision
+            combined = combined.to(self.boundary_proj.weight.dtype)
             return self.boundary_proj(combined)
 
         elif self.conditioning_mode == "add":
@@ -300,6 +302,8 @@ class BoundaryConditioningAdapter(nn.Module):
         elif self.conditioning_mode == "gate":
             # Gated combination
             combined = torch.cat([hidden_states, h_start], dim=-1)
+            # Ensure dtype matches projection layer weights for mixed precision
+            combined = combined.to(self.gate_proj.weight.dtype)
             gate = torch.sigmoid(self.gate_proj(combined))
             value = self.value_proj(combined)
             return gate * value + (1 - gate) * hidden_states
