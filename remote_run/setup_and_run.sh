@@ -21,9 +21,9 @@ echo "Setting up Python environment..."
 uv venv --python 3.10
 source .venv/bin/activate
 
-# Install PyTorch for CUDA 12.4 (compatible with CUDA 12.7 driver)
+# Install PyTorch for CUDA 12.8 (compatible with CUDA 12.7 driver)
 echo "Installing PyTorch and dependencies..."
-uv pip install torch --index-url https://download.pytorch.org/whl/cu124 --force-reinstall
+uv pip install torch --index-url https://download.pytorch.org/whl/cu128 --force-reinstall
 uv pip install transformers datasets torchmetrics torchdiffeq einops pyyaml safetensors numpy tqdm accelerate wandb --upgrade
 
 # Check for wandb authentication
