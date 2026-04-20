@@ -21,12 +21,24 @@ echo "Setting up Python environment..."
 uv venv --python 3.10
 source .venv/bin/activate
 
-# Install PyTorch for CUDA 12.1 (adjust for 3090)
+# Install PyTorch for CUDA 12.4 (compatible with CUDA 12.7 driver)
 echo "Installing PyTorch and dependencies..."
-uv pip install torch>=2.2.0 --index-url https://download.pytorch.org/whl/cu121
-uv pip install transformers>=4.57.0 datasets>=2.18.0 torchmetrics>=1.4.0
-uv pip install torchdiffeq>=0.2.5 einops>=0.8.0 pyyaml>=6.0
-uv pip install safetensors>=0.4.0 numpy>=1.26.0 tqdm accelerate
+uv pip install torch --index-url https://download.pytorch.org/whl/cu124 --force-reinstall
+uv pip install transformers datasets torchmetrics torchdiffeq einops pyyaml safetensors numpy tqdm accelerate wandb --upgrade
+
+# Check for wandb authentication
+echo ""
+if [ -z "$WANDB_API_KEY" ]; then
+    echo "WARNING: WANDB_API_KEY not set!"
+    echo "Options to authenticate:"
+    echo "  1. Set env var: export WANDB_API_KEY=your_key_here"
+    echo "  2. Run: wandb login"
+    echo ""
+    echo "Continuing without wandb authentication..."
+    echo "(experiments will still log to local files and tensorboard)"
+else
+    echo "WANDB_API_KEY detected - wandb will be enabled"
+fi
 
 echo ""
 echo "=== Environment ready ==="
