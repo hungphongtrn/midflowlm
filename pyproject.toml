@@ -19,6 +19,9 @@ dependencies = [
     "wandb",
 ]
 
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+
 [project.optional-dependencies]
 dev = [
     "pytest",
@@ -32,6 +35,11 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 default-groups = []
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
