@@ -6,4 +6,5 @@ __pycache__/
 .agent*
 .opencode/
 *cache/
+uv.lock
 outputs/uv.lock
