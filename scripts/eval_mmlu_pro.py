@@ -218,7 +218,7 @@ Answer:"""
 
 
 def extract_answer(text: str, valid_options: List[str]) -> str:
-    """Extract the answer letter from model output.
+    """Extract the answer letter from model output using robust regex patterns.
 
     Args:
         text: Model-generated text
@@ -227,29 +227,125 @@ def extract_answer(text: str, valid_options: List[str]) -> str:
     Returns:
         Extracted answer letter or "INVALID"
     """
-    text = text.strip().upper()
+    # Convert to lowercase for case-insensitive matching
+    text_lower = text.strip().lower()
 
-    # Create a set for faster lookup
-    valid_set = set(valid_options)
+    # Create a set for faster lookup (lowercase for comparison)
+    valid_set = set(opt.lower() for opt in valid_options)
 
-    # Try to find single letter at start
-    if len(text) > 0 and text[0] in valid_set:
-        return text[0]
+    # Pattern 1: "answer is X" or "the answer is X" (case insensitive)
+    # Matches: "answer is a", "the answer is b", "answer is (c)"
+    match = re.search(r"(?:the\s+)?answer\s+is\s+\(?([a-j])\)?", text_lower)
+    if match:
+        answer = match.group(1).upper()
+        if answer.lower() in valid_set:
+            return answer
 
-    # Try to find pattern like "A." or "(A)" or "A)" at start
-    match = re.match(r"^[\(\[]?([A-J])[\)\]\.]?\s*", text)
+    # Pattern 2: "answer: X" or "Answer: X" (case insensitive)
+    # Matches: "answer: a", "Answer: B", "answer: (c)"
+    match = re.search(r"answer:\s*\(?([a-j])\)?", text_lower)
+    if match:
+        answer = match.group(1).upper()
+        if answer.lower() in valid_set:
+            return answer
+
+    # Fallback: Try to find single letter at start (original behavior, case insensitive)
+    if len(text_lower) > 0 and text_lower[0] in valid_set:
+        return text_lower[0].upper()
+
+    # Fallback: Try to find pattern like "A." or "(A)" or "A)" at start
+    match = re.match(r"^[\(\[]?([a-j])[\)\]\.]?\s*", text_lower)
     if match and match.group(1) in valid_set:
-        return match.group(1)
+        return match.group(1).upper()
 
-    # Try to find standalone option letters (not part of other words)
-    # Look for patterns like " answer is X" or "X is correct"
+    # Fallback: Try to find standalone option letters anywhere in text
     for opt in valid_options:
+        opt_lower = opt.lower()
         # Pattern: word boundary + option + word boundary
-        pattern = r"\b" + re.escape(opt) + r"\b"
-        if re.search(pattern, text):
+        pattern = r"\b" + re.escape(opt_lower) + r"\b"
+        if re.search(pattern, text_lower):
             return opt
 
     return "INVALID"
+
+
+def generate_autoregressive(
+    model: torch.nn.Module,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    num_steps: int,
+    tokenizer: AutoTokenizer,
+    max_new_tokens: int = 256,
+    eos_token_id: Optional[int] = None,
+    is_student: bool = True,
+) -> Tuple[torch.Tensor, float]:
+    """Generate tokens autoregressively using the model.
+
+    Args:
+        model: Model to generate with
+        input_ids: Initial input token IDs [batch, seq_len]
+        attention_mask: Attention mask [batch, seq_len]
+        num_steps: Number of steps for iterative models
+        tokenizer: Tokenizer for detecting EOS
+        max_new_tokens: Maximum number of new tokens to generate
+        eos_token_id: Token ID that signals end of generation
+        is_student: Whether this is a student model
+
+    Returns:
+        Tuple of (generated_token_ids, latency_ms)
+    """
+    if eos_token_id is None:
+        eos_token_id = tokenizer.eos_token_id
+
+    generated_tokens = []
+    start_time = time.perf_counter()
+
+    model.eval()
+    with torch.no_grad():
+        current_input_ids = input_ids
+        current_attention_mask = attention_mask
+
+        for _ in range(max_new_tokens):
+            # Forward pass
+            if is_student:
+                logits = model(
+                    input_ids=current_input_ids,
+                    attention_mask=current_attention_mask,
+                    num_steps=num_steps,
+                )
+            else:
+                logits = model(current_input_ids, num_steps=num_steps)
+
+            # Get next token prediction (greedy)
+            next_token_logits = logits[:, -1, :]
+            next_token = next_token_logits.argmax(dim=-1, keepdim=True)
+
+            generated_tokens.append(next_token.item())
+
+            # Check for EOS
+            if next_token.item() == eos_token_id:
+                break
+
+            # Append to input for next iteration
+            current_input_ids = torch.cat([current_input_ids, next_token], dim=1)
+            # Extend attention mask
+            new_mask = torch.ones(
+                (current_attention_mask.size(0), 1),
+                dtype=current_attention_mask.dtype,
+                device=current_attention_mask.device,
+            )
+            current_attention_mask = torch.cat([current_attention_mask, new_mask], dim=1)
+
+            # Truncate if getting too long (to avoid OOM)
+            if current_input_ids.size(1) > 2048:
+                # Keep only the last 1024 tokens
+                current_input_ids = current_input_ids[:, -1024:]
+                current_attention_mask = current_attention_mask[:, -1024:]
+
+    end_time = time.perf_counter()
+    latency_ms = (end_time - start_time) * 1000
+
+    return torch.tensor([generated_tokens], device=input_ids.device), latency_ms
 
 
 def evaluate_question(
@@ -260,6 +356,7 @@ def evaluate_question(
     device: str,
     model_name: str,
     is_student: bool = True,
+    max_new_tokens: int = 256,
 ) -> Tuple[MMLUProResult, float]:
     """Evaluate a single MMLU-Pro question.
 
@@ -271,6 +368,7 @@ def evaluate_question(
         device: Device
         model_name: Name of the model
         is_student: Whether this is a student model
+        max_new_tokens: Maximum tokens to generate (default 256)
 
     Returns:
         Tuple of (MMLUProResult, latency_ms)
@@ -285,30 +383,21 @@ def evaluate_question(
     input_ids = inputs["input_ids"].to(device)
     attention_mask = inputs["attention_mask"].to(device)
 
-    # Generate with timing
-    start_time = time.perf_counter()
+    # Generate autoregressively with timing
+    generated_ids, latency_ms = generate_autoregressive(
+        model=model,
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        num_steps=num_steps,
+        tokenizer=tokenizer,
+        max_new_tokens=max_new_tokens,
+        eos_token_id=tokenizer.eos_token_id,
+        is_student=is_student,
+    )
 
-    model.eval()
-    with torch.no_grad():
-        if is_student:
-            logits = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                num_steps=num_steps,
-            )
-        else:
-            logits = model(input_ids, num_steps=num_steps)
-
-    # Get next token prediction
-    next_token_logits = logits[:, -1, :]
-    next_token = next_token_logits.argmax(dim=-1)
-
-    end_time = time.perf_counter()
-    latency_ms = (end_time - start_time) * 1000
-
-    # Decode - both with and without special tokens
-    raw_output_text = tokenizer.decode(next_token, skip_special_tokens=False)
-    generated_text = tokenizer.decode(next_token, skip_special_tokens=True)
+    # Decode the generated tokens
+    generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+    raw_output_text = tokenizer.decode(generated_ids[0], skip_special_tokens=False)
 
     # Extract answer
     valid_options = [chr(ord("A") + i) for i in range(len(question["options"]))]
@@ -324,7 +413,7 @@ def evaluate_question(
         model_name=model_name,
         prompt_text=prompt,
         prompt_tokens=input_ids[0].tolist(),
-        raw_output_token=int(next_token[0].item()),
+        raw_output_token=int(generated_ids[0][0].item()) if len(generated_ids[0]) > 0 else -1,
         raw_output_text=raw_output_text,
         category=question.get("category", "unknown"),
     )
@@ -340,6 +429,7 @@ def evaluate_model_on_mmlu_pro(
     device: str,
     model_name: str,
     is_student: bool = True,
+    max_new_tokens: int = 256,
 ) -> MMLUProReport:
     """Evaluate a model on the full MMLU-Pro set.
 
@@ -351,13 +441,15 @@ def evaluate_model_on_mmlu_pro(
         device: Device
         model_name: Name of the model
         is_student: Whether this is a student model
+        max_new_tokens: Maximum tokens to generate per question
 
     Returns:
         MMLUProReport with aggregated results
     """
     logger = logging.getLogger(__name__)
     logger.info(
-        f"Evaluating {model_name} with T={num_steps} on {len(questions)} questions..."
+        f"Evaluating {model_name} with T={num_steps} on {len(questions)} questions "
+        f"(max_new_tokens={max_new_tokens})..."
     )
 
     results = []
@@ -372,6 +464,7 @@ def evaluate_model_on_mmlu_pro(
             device=device,
             model_name=model_name,
             is_student=is_student,
+            max_new_tokens=max_new_tokens,
         )
         results.append(result)
         latencies.append(latency)
@@ -384,6 +477,24 @@ def evaluate_model_on_mmlu_pro(
     num_total = len(results)
     accuracy = num_correct / num_total if num_total > 0 else 0.0
     avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
+
+    # Log sample outputs for debugging (first 3 incorrect and first 3 correct)
+    incorrect_samples = [r for r in results if not r.is_correct][:3]
+    correct_samples = [r for r in results if r.is_correct][:3]
+
+    if incorrect_samples:
+        logger.info(f"\n  Sample INCORRECT predictions:")
+        for r in incorrect_samples:
+            logger.info(f"    Q: {r.question[:60]}...")
+            logger.info(f"    Expected: {r.correct_answer}, Predicted: {r.predicted_answer}")
+            logger.info(f"    Raw output: {r.raw_output_text[:100]}...")
+
+    if correct_samples:
+        logger.info(f"\n  Sample CORRECT predictions:")
+        for r in correct_samples:
+            logger.info(f"    Q: {r.question[:60]}...")
+            logger.info(f"    Answer: {r.correct_answer}")
+            logger.info(f"    Raw output: {r.raw_output_text[:100]}...")
 
     # Convert results to dicts for serialization
     detailed_results = [r.to_dict() for r in results]
@@ -518,6 +629,12 @@ def main():
         "--output", type=str, default=None, help="Path to save results JSON"
     )
     parser.add_argument("--log-level", type=str, default="INFO", help="Logging level")
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=256,
+        help="Maximum new tokens to generate per question (default: 256)",
+    )
 
     args = parser.parse_args()
 
@@ -587,6 +704,7 @@ def main():
                     device=device,
                     model_name="trained_midblock",
                     is_student=True,
+                    max_new_tokens=args.max_new_tokens,
                 )
 
                 logger.info(f"\n{report.summary()}")
@@ -622,6 +740,7 @@ def main():
             device=device,
             model_name="teacher_original",
             is_student=True,
+            max_new_tokens=args.max_new_tokens,
         )
 
         logger.info(f"\n{report.summary()}")
