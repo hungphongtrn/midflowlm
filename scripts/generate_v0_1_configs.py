@@ -27,11 +27,12 @@ print(
     f"Detected {CPU_COUNT} CPU cores, configuring {OPTIMAL_WORKERS} dataloader workers per experiment"
 )
 
-# Hardware profile (auto-optimized for available CPUs)
+# Hardware profile for RTX 3090 24GB
+# Default conservative settings - batch_size will be overridden per config based on memory needs
 HARDWARE_PROFILE = {
     "seq_len": 1024,
-    "batch_size": 3,  # microbatch = 3
-    "num_workers": OPTIMAL_WORKERS,  # Auto-calculated: (cores - 2) / 3 GPUs
+    "batch_size": 1,  # Default to 1 for safety, overridden per config
+    "num_workers": 2,  # Reduced from 4 to 2 to save memory
     "pin_memory": True,  # Enable for GPU training
     "persistent_workers": True,  # Keep workers alive between epochs
     "prefetch_factor": 4,  # Prefetch 4 batches per worker
@@ -40,7 +41,7 @@ HARDWARE_PROFILE = {
 # Training settings (fixed for all experiments)
 TRAINING_DEFAULTS = {
     "max_epochs": 3,
-    "accumulate_grad_batches": 5,  # grad accum = 5 (3*5=15 effective batch)
+    "accumulate_grad_batches": 8,  # grad accum = 8 (matches 3090 profile)
     "sample_continuous_time": True,
     "log_every_n_steps": 10,
     "val_check_interval": 250,
@@ -225,12 +226,24 @@ def build_config(
     tags: list,
     seed: int = 1337,
     shuffle_seed: int = 1337,
+    batch_size: int = None,
 ) -> dict:
-    """Build a complete experiment config."""
+    """Build a complete experiment config.
+
+    Args:
+        batch_size: Override default batch_size. If None, uses HARDWARE_PROFILE default.
+                   Use batch_size=2 for simple configs (one_shot, single T)
+                   Use batch_size=1 for complex configs (recurrent/flow, multi-T, heavy loss)
+    """
 
     # Build paths from experiment name
     safe_name = experiment_name.replace("-", "_")
     output_base = f"./outputs/{safe_name}"
+
+    # Determine batch_size - use override if provided, else default
+    final_batch_size = (
+        batch_size if batch_size is not None else HARDWARE_PROFILE["batch_size"]
+    )
 
     config = {
         "experiment_name": experiment_name,
@@ -249,7 +262,7 @@ def build_config(
         "data": {
             "loader": "mixture",
             "seq_len": HARDWARE_PROFILE["seq_len"],
-            "batch_size": HARDWARE_PROFILE["batch_size"],
+            "batch_size": final_batch_size,
             "num_workers": HARDWARE_PROFILE["num_workers"],
             "pin_memory": HARDWARE_PROFILE["pin_memory"],
             "persistent_workers": HARDWARE_PROFILE["persistent_workers"],
@@ -308,6 +321,7 @@ def generate_p1_configs():
     }
 
     # P1-A1: One-shot projector, Mix B, End + KL, T=1
+    # batch_size=2: Simple architecture with single T value, lowest memory usage
     configs.append(
         build_config(
             experiment_name="midflow_qwen_8to11_p1_a1_proj_mixb_endkl",
@@ -318,10 +332,12 @@ def generate_p1_configs():
             train_T_weights=[1.0],
             eval_T_values=[1],
             tags=["v0.1", "p1", "a1", "architecture", "baseline", "mix-b"],
+            batch_size=2,  # Can use larger batch due to simple architecture + single T
         )
     )
 
     # P1-A2: Shared recurrent residual, Mix B, End + KL, T={2,4,6,8}
+    # batch_size=1: Recurrent architecture with multi-T is memory intensive
     configs.append(
         build_config(
             experiment_name="midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT-r2468",
@@ -332,10 +348,12 @@ def generate_p1_configs():
             train_T_weights=[0.25, 0.25, 0.25, 0.25],
             eval_T_values=[1, 2, 4, 8],
             tags=["v0.1", "p1", "a2", "architecture", "recurrent", "mix-b"],
+            batch_size=1,  # Reduced: recurrent + multi-T caused OOM with batch_size=2
         )
     )
 
     # P1-A3: Flow midblock, Mix B, End + KL, T={2,4,6,8}
+    # batch_size=1: Flow architecture with multi-T is memory intensive
     configs.append(
         build_config(
             experiment_name="midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT-r2468",
@@ -346,6 +364,7 @@ def generate_p1_configs():
             train_T_weights=[0.25, 0.25, 0.25, 0.25],
             eval_T_values=[1, 2, 4, 8],
             tags=["v0.1", "p1", "a3", "architecture", "flow", "mix-b"],
+            batch_size=1,  # Reduced: flow + multi-T needs memory
         )
     )
 
@@ -400,6 +419,7 @@ def generate_p2_configs():
     }
 
     # P2-L1: Flow, Mix B, End only
+    # batch_size=1: Flow + multi-T needs reduced batch
     configs.append(
         build_config(
             experiment_name="midflow_qwen_8to11_p2_l1_flow_mixb_end_trainT-r2468",
@@ -410,10 +430,12 @@ def generate_p2_configs():
             train_T_weights=[0.25, 0.25, 0.25, 0.25],
             eval_T_values=[1, 2, 4, 8],
             tags=["v0.1", "p2", "l1", "loss", "endpoint-only", "mix-b"],
+            batch_size=1,  # Flow + multi-T
         )
     )
 
     # P2-L2: Flow, Mix B, End + KL
+    # batch_size=1: Flow + multi-T + KL loss needs reduced batch
     configs.append(
         build_config(
             experiment_name="midflow_qwen_8to11_p2_l2_flow_mixb_endkl_trainT-r2468",
@@ -424,10 +446,12 @@ def generate_p2_configs():
             train_T_weights=[0.25, 0.25, 0.25, 0.25],
             eval_T_values=[1, 2, 4, 8],
             tags=["v0.1", "p2", "l2", "loss", "end+kl", "mix-b"],
+            batch_size=1,  # Flow + multi-T + KL
         )
     )
 
     # P2-L3: Flow, Mix B, End + Traj + KL
+    # batch_size=1: Flow + multi-T + trajectory loss needs reduced batch
     configs.append(
         build_config(
             experiment_name="midflow_qwen_8to11_p2_l3_flow_mixb_endtrajkl_trainT-r2468",
@@ -438,10 +462,12 @@ def generate_p2_configs():
             train_T_weights=[0.25, 0.25, 0.25, 0.25],
             eval_T_values=[1, 2, 4, 8],
             tags=["v0.1", "p2", "l3", "loss", "end+traj+kl", "mix-b"],
+            batch_size=1,  # Flow + multi-T + trajectory loss
         )
     )
 
     # P2-L4: Flow, Mix B, End + Traj + KL + CE
+    # batch_size=1: Already set to 1 - heaviest loss combination
     configs.append(
         build_config(
             experiment_name="midflow_qwen_8to11_p2_l4_flow_mixb_endtrajklce_trainT-r2468",
@@ -452,6 +478,7 @@ def generate_p2_configs():
             train_T_weights=[0.25, 0.25, 0.25, 0.25],
             eval_T_values=[1, 2, 4, 8],
             tags=["v0.1", "p2", "l4", "loss", "end+traj+kl+ce", "mix-b"],
+            batch_size=1,  # Heaviest config: flow + multi-T + all losses
         )
     )
 
@@ -474,6 +501,7 @@ def generate_p3_configs():
     }
 
     # P3-D1: Flow, Mix A, End + Traj + KL
+    # batch_size=1: Flow + multi-T + trajectory loss
     configs.append(
         build_config(
             experiment_name="midflow_qwen_8to11_p3_d1_flow_mixa_endtrajkl_trainT-r2468",
@@ -484,10 +512,12 @@ def generate_p3_configs():
             train_T_weights=[0.25, 0.25, 0.25, 0.25],
             eval_T_values=[1, 2, 4, 8],
             tags=["v0.1", "p3", "d1", "data", "mix-a"],
+            batch_size=1,  # Flow + multi-T + trajectory
         )
     )
 
     # P3-D2: Flow, Mix B, End + Traj + KL
+    # batch_size=1: Flow + multi-T + trajectory loss
     configs.append(
         build_config(
             experiment_name="midflow_qwen_8to11_p3_d2_flow_mixb_endtrajkl_trainT-r2468",
@@ -498,10 +528,12 @@ def generate_p3_configs():
             train_T_weights=[0.25, 0.25, 0.25, 0.25],
             eval_T_values=[1, 2, 4, 8],
             tags=["v0.1", "p3", "d2", "data", "mix-b"],
+            batch_size=1,  # Flow + multi-T + trajectory
         )
     )
 
     # P3-D3: Flow, Mix C, End + Traj + KL
+    # batch_size=1: Already set to 1 - Mix C (6 components) is heaviest
     configs.append(
         build_config(
             experiment_name="midflow_qwen_8to11_p3_d3_flow_mixc_endtrajkl_trainT-r2468",
@@ -512,6 +544,7 @@ def generate_p3_configs():
             train_T_weights=[0.25, 0.25, 0.25, 0.25],
             eval_T_values=[1, 2, 4, 8],
             tags=["v0.1", "p3", "d3", "data", "mix-c"],
+            batch_size=1,  # Heaviest data mix + flow + multi-T
         )
     )
 
