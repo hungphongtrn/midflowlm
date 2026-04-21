@@ -165,7 +165,7 @@ Answer:"""
 
 
 def extract_answer(text: str, valid_options: List[str]) -> str:
-    """Extract the answer letter from model output.
+    """Extract the answer letter from model output using robust regex patterns.
     
     Args:
         text: Model-generated text
@@ -174,22 +174,40 @@ def extract_answer(text: str, valid_options: List[str]) -> str:
     Returns:
         Extracted answer letter or "INVALID"
     """
-    text = text.strip().upper()
-    valid_set = set(valid_options)
+    # Convert to lowercase for case-insensitive matching
+    text_lower = text.strip().lower()
+    valid_set = set(opt.lower() for opt in valid_options)
     
-    # Try to find single letter at start
-    if len(text) > 0 and text[0] in valid_set:
-        return text[0]
+    # Pattern 1: "answer is X" or "the answer is X" (case insensitive)
+    # Matches: "answer is a", "the answer is b", "answer is (c)"
+    match = re.search(r"(?:the\s+)?answer\s+is\s+\(?([a-j])\)?", text_lower)
+    if match:
+        answer = match.group(1).upper()
+        if answer.lower() in valid_set:
+            return answer
     
-    # Try to find pattern like "A." or "(A)" or "A)" at start
-    match = re.match(r"^[\(\[]?([A-J])[\)\]\.]?\s*", text)
+    # Pattern 2: "answer: X" or "Answer: X" (case insensitive)
+    # Matches: "answer: a", "Answer: B", "answer: (c)"
+    match = re.search(r"answer:\s*\(?([a-j])\)?", text_lower)
+    if match:
+        answer = match.group(1).upper()
+        if answer.lower() in valid_set:
+            return answer
+    
+    # Fallback: Try to find single letter at start (case insensitive)
+    if len(text_lower) > 0 and text_lower[0] in valid_set:
+        return text_lower[0].upper()
+    
+    # Fallback: Try to find pattern like "A." or "(A)" or "A)" at start
+    match = re.match(r"^[\(\[]?([a-j])[\)\]\.]?\s*", text_lower)
     if match and match.group(1) in valid_set:
-        return match.group(1)
+        return match.group(1).upper()
     
-    # Try to find standalone option letters
+    # Fallback: Try to find standalone option letters anywhere
     for opt in valid_options:
-        pattern = r"\b" + re.escape(opt) + r"\b"
-        if re.search(pattern, text):
+        opt_lower = opt.lower()
+        pattern = r"\b" + re.escape(opt_lower) + r"\b"
+        if re.search(pattern, text_lower):
             return opt
     
     return "INVALID"
@@ -202,8 +220,9 @@ def generate_with_model(
     device: str,
     num_steps: int = 1,
     is_student: bool = True,
+    max_new_tokens: int = 256,
 ) -> Tuple[str, str, int]:
-    """Generate response from model and return both raw and decoded text.
+    """Generate response from model autoregressively and return both raw and decoded text.
     
     NOTE: Processes single sample (batch size 1) to minimize VRAM usage.
     This is intentional for running evaluation alongside training.
@@ -215,36 +234,72 @@ def generate_with_model(
         device: Device
         num_steps: Number of steps for student model
         is_student: Whether this is a student model
+        max_new_tokens: Maximum number of new tokens to generate (default 256)
     
     Returns:
-        Tuple of (decoded_text_with_special_tokens, decoded_text_clean, token_id)
+        Tuple of (decoded_text_with_special_tokens, decoded_text_clean, first_token_id)
     """
     # Tokenize (batch size 1)
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
     input_ids = inputs["input_ids"].to(device)
     attention_mask = inputs["attention_mask"].to(device)
     
+    eos_token_id = tokenizer.eos_token_id
+    generated_tokens = []
+    first_token_id = -1
+    
     model.eval()
     with torch.no_grad():
-        if is_student:
-            logits = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                num_steps=num_steps,
+        current_input_ids = input_ids
+        current_attention_mask = attention_mask
+        
+        for i in range(max_new_tokens):
+            # Forward pass
+            if is_student:
+                logits = model(
+                    input_ids=current_input_ids,
+                    attention_mask=current_attention_mask,
+                    num_steps=num_steps,
+                )
+            else:
+                logits = model(current_input_ids, num_steps=num_steps)
+            
+            # Get next token prediction (greedy)
+            next_token_logits = logits[:, -1, :]
+            next_token = next_token_logits.argmax(dim=-1, keepdim=True)
+            token_id = int(next_token[0].item())
+            
+            # Track first token ID
+            if i == 0:
+                first_token_id = token_id
+            
+            generated_tokens.append(token_id)
+            
+            # Check for EOS
+            if token_id == eos_token_id:
+                break
+            
+            # Append to input for next iteration
+            current_input_ids = torch.cat([current_input_ids, next_token], dim=1)
+            # Extend attention mask
+            new_mask = torch.ones(
+                (current_attention_mask.size(0), 1),
+                dtype=current_attention_mask.dtype,
+                device=current_attention_mask.device,
             )
-        else:
-            logits = model(input_ids, num_steps=num_steps)
+            current_attention_mask = torch.cat([current_attention_mask, new_mask], dim=1)
+            
+            # Truncate if getting too long (to avoid OOM)
+            if current_input_ids.size(1) > 2048:
+                current_input_ids = current_input_ids[:, -1024:]
+                current_attention_mask = current_attention_mask[:, -1024:]
     
-    # Get next token prediction
-    next_token_logits = logits[:, -1, :]
-    next_token = next_token_logits.argmax(dim=-1)
-    token_id = int(next_token[0].item())
+    # Decode all generated tokens
+    generated_tensor = torch.tensor([generated_tokens], device=device)
+    raw_output_with_special = tokenizer.decode(generated_tensor[0], skip_special_tokens=False)
+    clean_output = tokenizer.decode(generated_tensor[0], skip_special_tokens=True)
     
-    # Decode - both with and without special tokens
-    raw_output_with_special = tokenizer.decode(next_token, skip_special_tokens=False)
-    clean_output = tokenizer.decode(next_token, skip_special_tokens=True)
-    
-    return raw_output_with_special, clean_output, token_id
+    return raw_output_with_special, clean_output, first_token_id
 
 
 def create_base_model(config: dict, device: str) -> FrozenQwenStudent:
@@ -318,6 +373,7 @@ def run_side_by_side_evaluation(
     questions: List[Dict[str, Any]],
     device: str,
     low_memory: bool = False,
+    max_new_tokens: int = 256,
 ) -> List[Dict[str, Any]]:
     """Run side-by-side evaluation on all questions.
     
@@ -331,6 +387,7 @@ def run_side_by_side_evaluation(
         questions: List of questions
         device: Device
         low_memory: If True, clear CUDA cache aggressively after each question
+        max_new_tokens: Maximum tokens to generate per question
     
     Returns:
         List of result dictionaries for CSV
@@ -347,7 +404,8 @@ def run_side_by_side_evaluation(
         
         # Generate with base model (batch size 1 to save memory)
         base_raw, base_clean, base_token_id = generate_with_model(
-            base_model, tokenizer, prompt, device, num_steps=1, is_student=True
+            base_model, tokenizer, prompt, device, num_steps=1, is_student=True,
+            max_new_tokens=max_new_tokens
         )
         
         # Clear cache if using CUDA to free memory for next model
@@ -356,7 +414,8 @@ def run_side_by_side_evaluation(
         
         # Generate with P1-A1 model (batch size 1 to save memory)
         p1_a1_raw, p1_a1_clean, p1_a1_token_id = generate_with_model(
-            p1_a1_model, tokenizer, prompt, device, num_steps=1, is_student=True
+            p1_a1_model, tokenizer, prompt, device, num_steps=1, is_student=True,
+            max_new_tokens=max_new_tokens
         )
         
         # Extract answers
@@ -505,6 +564,10 @@ def main():
         "--low-memory", action="store_true",
         help="Enable aggressive memory optimization for limited VRAM (13GB)"
     )
+    parser.add_argument(
+        "--max-new-tokens", type=int, default=256,
+        help="Maximum new tokens to generate per question (default: 256)"
+    )
     
     args = parser.parse_args()
     
@@ -552,7 +615,8 @@ def main():
     logger.info("Running side-by-side evaluation...")
     if args.low_memory:
         logger.info("Low memory mode: Enabled (for 13GB VRAM)")
-    logger.info("Batch size: 1 (processing single samples)")
+    logger.info(f"Batch size: 1 (processing single samples)")
+    logger.info(f"Max new tokens: {args.max_new_tokens}")
     logger.info("=" * 60)
     
     results = run_side_by_side_evaluation(
@@ -562,6 +626,7 @@ def main():
         questions=questions,
         device=device,
         low_memory=args.low_memory,
+        max_new_tokens=args.max_new_tokens,
     )
     
     # Print summary
