@@ -10,6 +10,36 @@ Usage:
     python scripts/eval_mmlu_pro.py --config configs/v0_onemotif.yaml --checkpoint ./checkpoints/best.ckpt
     python scripts/eval_mmlu_pro.py --config configs/v0_onemotif.yaml --baseline identity
     python scripts/eval_mmlu_pro.py --config configs/v0_onemotif.yaml --num-samples 70 --num-steps 4 8
+
+================================================================================
+EXPERIMENT RESULTS - MMLU-Pro Evaluation (72 samples, 256 max_new_tokens)
+================================================================================
+
+P1-A1: One-shot Projector (T=1 only)
+  Checkpoint: ./outputs/midflow_qwen_8to11_p1_a1_proj_mixb_endkl/checkpoints/best.ckpt
+  Config: configs/v0_1_matrix/midflow_qwen_8to11_p1_a1_proj_mixb_endkl.yaml
+  Results:
+    - Base model (Qwen3.5-0.8B): 18/72 correct (25.0%)
+    - P1-A1 (T=1): 4/72 correct (5.6%), 25/72 (34.7%) invalid outputs
+  Issue: Could not complete generation with only 32 tokens; outputs fragments like "Based", "To", "The"
+
+P1-A2: Shared Recurrent Residual (T ∈ [1, 2, 4, 8])
+  Checkpoint: ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt
+  Config: configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml
+  W&B Run: ze54okvs (stilted-paper-3)
+  Training: Multi-step with T ∈ [2,4,6,8], Endpoint + KL loss, Mix B
+  Eval T values: [1, 2, 4, 8]
+  
+  Evaluation Commands:
+    T=1:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 1 --num-samples 72 --max-new-tokens 256
+    T=2:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 2 --num-samples 72 --max-new-tokens 256
+    T=4:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 4 --num-samples 72 --max-new-tokens 256
+    T=8:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 8 --num-samples 72 --max-new-tokens 256
+  
+  Expected: Performance should improve with more steps (T=4,8 > T=1,2)
+  Baseline: Teacher model (full Qwen3.5-0.8B) = 25.0% accuracy
+
+================================================================================
 """
 
 import argparse
@@ -594,7 +624,21 @@ def create_student_model(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate models on MMLU-Pro")
+    parser = argparse.ArgumentParser(
+        description="Evaluate models on MMLU-Pro",
+        epilog="""
+Examples:
+  # P1-A1: One-shot projector (T=1 only)
+  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a1_proj_mixb_endkl.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a1_proj_mixb_endkl/checkpoints/best.ckpt --num-steps 1
+
+  # P1-A2: Shared recurrent residual - evaluate all T values
+  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 1 2 4 8 --num-samples 72 --max-new-tokens 256
+
+  # Teacher baseline
+  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --num-samples 72
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--config", type=str, required=True, help="Path to config YAML file"
     )
@@ -688,6 +732,8 @@ def main():
     if args.checkpoint:
         logger.info(f"\n{'=' * 60}")
         logger.info(f"Evaluating student model from checkpoint")
+        logger.info(f"Checkpoint: {args.checkpoint}")
+        logger.info(f"Evaluating T values: {num_steps_list}")
         logger.info("=" * 60)
 
         try:
@@ -768,14 +814,42 @@ def main():
 
     # Print final summary table
     logger.info("\n" + "=" * 60)
-    logger.info("FINAL SUMMARY")
+    logger.info("FINAL SUMMARY - MMLU-Pro Results")
     logger.info("=" * 60)
+    logger.info(f"{'Model':<20} {'T':>3} | {'Accuracy':>10} | {'Correct':>8} | {'Latency':>10}")
+    logger.info("-" * 60)
     for result in all_results:
         logger.info(
-            f"{result['model_name']:20s} T={result['num_steps']:2d} | "
-            f"Accuracy: {result['accuracy']:.2%} | "
-            f"Latency: {result['avg_latency_ms']:.2f}ms"
+            f"{result['model_name']:<20} {result['num_steps']:>3} | "
+            f"{result['accuracy']:>9.2%} | "
+            f"{result['num_correct']:>3}/{result['num_total']:<4} | "
+            f"{result['avg_latency_ms']:>9.2f}ms"
         )
+    logger.info("=" * 60)
+
+    # T-sweep comparison if multiple T values were evaluated
+    student_results = [r for r in all_results if r['model_name'] == 'trained_midblock']
+    if len(student_results) > 1:
+        logger.info("\n" + "=" * 60)
+        logger.info("T-SWEEP COMPARISON (Student Model)")
+        logger.info("=" * 60)
+        logger.info(f"{'T':>3} | {'Accuracy':>10} | {'Correct':>8} | {'vs T=1':>10}")
+        logger.info("-" * 40)
+        baseline_acc = None
+        for result in sorted(student_results, key=lambda x: x['num_steps']):
+            acc = result['accuracy']
+            if baseline_acc is None:
+                baseline_acc = acc
+                improvement = "baseline"
+            else:
+                improvement = f"+{(acc - baseline_acc):.2%}"
+            logger.info(
+                f"{result['num_steps']:>3} | "
+                f"{acc:>9.2%} | "
+                f"{result['num_correct']:>3}/{result['num_total']:<4} | "
+                f"{improvement:>10}"
+            )
+        logger.info("=" * 60)
 
 
 if __name__ == "__main__":

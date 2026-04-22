@@ -18,7 +18,7 @@ This document tracks the results of the v0.1 experiment matrix for the MidFlowLM
 | Phase | Exp ID | Hypothesis | Architecture | Loss (End/Traj/KL/CE) | Train T | Eval T | Data Mix | Status | Best Val Loss | Best T | Notes |
 |-------|--------|------------|--------------|------------------------|---------|--------|----------|--------|---------------|--------|-------|
 | **P1** | A1 | One-shot projector is simplest baseline | `one_shot_projector` | 1.0/0.0/0.5/0.0 | [1] | [1] | Mix B | ✅ **Complete** | 0.056 | T=1 | Baseline: simple proj |
-| **P1** | A2 | Recurrent residual captures multi-step better | `recurrent_residual_block` | 1.0/0.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | Mix B | 🔄 **Running** | - | - | First attempt failed, retry running |
+| **P1** | A2 | Recurrent residual captures multi-step better | `shared_recurrent_residual` | 1.0/0.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | Mix B | ✅ **Complete** | 0.056 | T=5 | 56% val/train gap |
 | **P1** | A3 | Flow midblock enables continuous time | `flow_midblock` | 1.0/0.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | Mix B | ⏳ Pending | - | - | ✅ **Preferred arch** |
 | **P2** | L1 | Endpoint-only is too weak | `flow_midblock` | 1.0/0.0/0.0/0.0 | [2,4,6,8] | [1,2,4,8] | Mix B | ⏳ Pending | - | - | No teacher guidance |
 | **P2** | L2 | Adding KL improves stability | `flow_midblock` | 1.0/0.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | Mix B | ⏳ Pending | - | - | Matches P1-A3 |
@@ -43,11 +43,13 @@ This document tracks the results of the v0.1 experiment matrix for the MidFlowLM
 
 | Metric | P1-A1 (Projector) | P1-A2 (Recurrent) | P1-A3 (Flow) | Winner |
 |--------|-------------------|-------------------|--------------|--------|
-| Final Val Loss | **0.056** | In Progress | - | TBD |
-| Best Epoch | 3 | In Progress | - | TBD |
-| Train Time | ~10.7 hrs | ~3+ hrs | - | TBD |
+| Final Val Loss | **0.056** | **0.056** | - | TBD |
+| Train Loss | 0.063 | 0.036 | - | TBD |
+| Val/Train Gap | -11% | +56% | - | TBD |
+| Best Epoch | 3 | 3 | - | TBD |
+| Train Time | ~10.7 hrs | ~19.3 hrs | - | TBD |
 | Peak GPU Mem | ~24GB | ~24GB | - | TBD |
-| Convergence | Stable | In Progress | - | TBD |
+| Convergence | Stable | Stable | - | TBD |
 | W&B Run | [ihjl2i6s](https://wandb.ai/yuuart/midflowlm-v0-1/runs/ihjl2i6s) | [ze54okvs](https://wandb.ai/yuuart/midflowlm-v0-1/runs/ze54okvs) | - | - |
 
 **P1-A1 Detailed Results**:
@@ -63,21 +65,34 @@ This document tracks the results of the v0.1 experiment matrix for the MidFlowLM
   - No trajectory loss needed for single-step training
   - KL loss provides teacher guidance (0.11 final val KL)
   - Training completed without OOM or crashes
+  - **MMLU-Pro Test Set Benchmark** (32 max new tokens):
+    - Base model (Qwen3.5-0.8B): 18/72 correct (25.0%)
+    - P1-A1 (One-shot projector): 4/72 correct (5.6%), 25/72 (34.7%) invalid outputs
+    - **Issue**: P1-A1 could not complete generation to produce "answer is ..." pattern with only 32 tokens
+    - Base model produced all valid outputs; P1-A1 outputs fragments like "Based", "To", "The"
 
-**P1-A2 Status (Recurrent Residual)**:
-- **Attempt 1** (xczl41d1): Failed after 23s - likely OOM or startup error
-  - Config: batch_size=2, accumulate=5
-- **Attempt 2** (ze54okvs): Currently running with adjusted settings
-  - Config: batch_size=1, accumulate=16 (same effective batch size)
-  - Started: 2026-04-21T06:03:19Z
-  - Current step: 574, current val loss: 0.076
-  - Multi-step training: T ∈ [2,4,6,8]
-  - Status: Training in progress
+**P1-A2 Results (Shared Recurrent Residual)**:
+- **W&B Run**: [stilted-paper-3 (ze54okvs)](https://wandb.ai/yuuart/midflowlm-v0-1/runs/ze54okvs)
+- **Final Val Loss**: 0.0562 (endpoint: 0.0562, KL: 0.1098)
+- **Final Train Loss**: 0.0358 (endpoint: 0.0358, KL: 0.0693)
+- **Training Steps**: 3,201 steps (~19.3 hours)
+- **Convergence**: Stable throughout all 3 epochs
+- **Gradient Norm**: 1.397 (well-behaved)
+- **Learning Rate**: Followed cosine schedule, reached 9.91e-5
+- **Architecture**: Shared recurrent residual block (4-layer, layers 8-11)
+- **Configuration**: Endpoint + KL loss, T ∈ [2,4,6,8], Mix B
+- **Key Observations**:
+  - ✅ Training stable, no NaN values
+  - ⚠️ 56% higher validation loss vs training (overfitting indicator)
+  - Training loss (0.036) better than P1-A1 (0.063), but similar val loss
+  - Multi-step training with shared parameters across T values
+  - Attempt 1 failed (OOM), Attempt 2 succeeded with batch_size=1
 
 **Key Verifiable Points**:
-1. ⏳ Flow midblock converges better than one-shot projector (waiting for P1-A2, P1-A3)
-2. ⏳ Flow midblock converges better than recurrent residual (waiting for P1-A2, P1-A3)
-3. ⏳ Multi-step training ([2,4,6,8]) outperforms single-step ([1]) (waiting for P1-A2, P1-A3)
+1. ⏳ Flow midblock converges better than one-shot projector (waiting for P1-A3)
+2. ⏳ Flow midblock converges better than recurrent residual (waiting for P1-A3)
+3. ⚠️ P1-A2 (multi-step) achieved same val loss as P1-A1 (single-step) - needs P1-A3 to verify benefit
+4. ⚠️ P1-A2 shows higher val/train gap than P1-A1 (56% vs -11%) - architecture may overfit more
 
 ---
 
@@ -189,6 +204,8 @@ This document tracks the results of the v0.1 experiment matrix for the MidFlowLM
 |------|--------|
 | 2026-04-21 | Created experiment report template |
 | 2026-04-21 | Added P1-A1 results (ihjl2i6s) - One-shot projector baseline |
+| 2026-04-21 | Added P1-A1 MMLU-Pro benchmark results (base: 18/72, P1-A1: 4/72 with 25 invalid) |
+| 2026-04-22 | Added P1-A2 results (ze54okvs) - Shared recurrent residual, 56% val/train gap observed |
 | | | |
 
 ---

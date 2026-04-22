@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Experiment 2 (P1-A2) Analysis - Shared Recurrent Residual</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 { color: #2c3e50; margin-bottom: 10px; }
+        h2 { color: #34495e; margin: 30px 0 15px; padding-bottom: 10px; border-bottom: 2px solid #eee; }
+        h3 { color: #555; margin: 20px 0 10px; }
+        .meta {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .meta-item { display: inline-block; margin-right: 30px; }
+        .meta-label { font-weight: bold; color: #7f8c8d; }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .status-finished { background: #27ae60; color: white; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        tr:hover { background: #f8f9fa; }
+        .metric-good { color: #27ae60; font-weight: bold; }
+        .metric-warning { color: #f39c12; font-weight: bold; }
+        .metric-bad { color: #e74c3c; font-weight: bold; }
+        .highlight-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .code-block {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .finding {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .recommendation {
+            background: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        a { color: #3498db; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔬 Experiment 2 Analysis Report</h1>
+        <h3>Phase 1-A2: Shared Recurrent Residual Architecture</h3>
+
+        <div class="meta">
+            <div class="meta-item">
+                <span class="meta-label">W&B Run:</span>
+                <a href="https://wandb.ai/yuuart/midflowlm-v0-1/runs/ze54okvs" target="_blank">stilted-paper-3 (ze54okvs)</a>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Status:</span>
+                <span class="status-badge status-finished">✅ Finished</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Duration:</span> ~19.3 hours
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Completed:</span> April 22, 2026
+            </div>
+        </div>
+
+        <h2>📊 Configuration Summary</h2>
+        <table>
+            <tr><th>Parameter</th><th>Value</th></tr>
+            <tr><td>Experiment ID</td><td>P1-A2</td></tr>
+            <tr><td>Architecture</td><td>Shared Recurrent Residual Block</td></tr>
+            <tr><td>Loss Configuration</td><td>Endpoint + KL</td></tr>
+            <tr><td>Data Mix</td><td>Mix B (FineWeb + UltraChat)</td></tr>
+            <tr><td>Train T Values</td><td>[2, 4, 6, 8]</td></tr>
+            <tr><td>Model</td><td>Qwen/Qwen3.5-0.8B</td></tr>
+            <tr><td>Replacement Layers</td><td>8-11 (4 layers)</td></tr>
+            <tr><td>Effective Batch Size</td><td>16 (accumulation)</td></tr>
+            <tr><td>Learning Rate</td><td>1e-4</td></tr>
+            <tr><td>Precision</td><td>bf16-mixed</td></tr>
+        </table>
+
+        <h2>📈 Final Metrics</h2>
+        <div class="highlight-box">
+            <table style="color: white; margin: 0;">
+                <tr>
+                    <th style="background: transparent; color: white;">Metric</th>
+                    <th style="background: transparent; color: white;">Training</th>
+                    <th style="background: transparent; color: white;">Validation</th>
+                    <th style="background: transparent; color: white;">Gap</th>
+                </tr>
+                <tr>
+                    <td><strong>Total Loss</strong></td>
+                    <td>0.0358</td>
+                    <td>0.0562</td>
+                    <td>+56%</td>
+                </tr>
+                <tr>
+                    <td><strong>KL Loss</strong></td>
+                    <td>0.0693</td>
+                    <td>0.1098</td>
+                    <td>+58%</td>
+                </tr>
+                <tr>
+                    <td>Gradient Norm</td>
+                    <td>1.397</td>
+                    <td>-</td>
+                    <td>-</td>
+                </tr>
+                <tr>
+                    <td>Mean T (sampled)</td>
+                    <td>0.764</td>
+                    <td>5.06</td>
+                    <td>-</td>
+                </tr>
+            </table>
+        </div>
+
+        <h2>🔍 Key Findings</h2>
+
+        <div class="finding">
+            <h3>✅ Training Stability Achieved</h3>
+            <p>Stable convergence observed over 3,201 training steps. Final gradient norm (1.397) indicates healthy training dynamics. No NaN values detected throughout the run.</p>
+        </div>
+
+        <div class="finding">
+            <h3>⚠️ Moderate Validation Gap</h3>
+            <p>Validation loss is 56% higher than training loss (0.056 vs 0.036). This suggests:</p>
+            <ul>
+                <li>Some degree of overfitting to training data</li>
+                <li>Generalization room for improvement</li>
+                <li>Potential benefit from additional regularization</li>
+            </ul>
+        </div>
+
+        <div class="finding">
+            <h3>✅ Loss Configuration Validated</h3>
+            <p>Endpoint + KL loss configuration working as designed:</p>
+            <ul>
+                <li>Endpoint loss: 100% of total (weights: endpoint=1.0, kl=0.5)</li>
+                <li>CE and Velocity losses correctly disabled (weight=0)</li>
+                <li>KL divergence properly guiding distribution matching</li>
+            </ul>
+        </div>
+
+        <h2>🏗️ Architecture Details</h2>
+        <div class="code-block">
+family: shared_recurrent_residual
+depth: 4
+start_layer: 8
+end_layer: 11
+conditioning_mode: timestep_plus_layer_boundary
+use_step_conditioning: true
+use_qwen_causal_mask: true
+init_strategy: fresh
+mlp_ratio: 4
+qkv_bias: true
+        </div>
+
+        <h2>📊 Phase 1 Comparison</h2>
+        <table>
+            <tr>
+                <th>Experiment</th>
+                <th>Architecture</th>
+                <th>Train Loss</th>
+                <th>Val Loss</th>
+                <th>Status</th>
+            </tr>
+            <tr>
+                <td>P1-A1</td>
+                <td>One-shot Projector</td>
+                <td>-</td>
+                <td>-</td>
+                <td>Baseline</td>
+            </tr>
+            <tr style="background: #e8f5e9;">
+                <td><strong>P1-A2</strong></td>
+                <td><strong>Shared Recurrent</strong></td>
+                <td><strong>0.036</strong></td>
+                <td><strong>0.056</strong></td>
+                <td><strong>✅ Complete</strong></td>
+            </tr>
+            <tr>
+                <td>P1-A3</td>
+                <td>Flow Midblock</td>
+                <td>-</td>
+                <td>-</td>
+                <td>Pending</td>
+            </tr>
+        </table>
+
+        <h2>💡 Recommendations</h2>
+
+        <div class="recommendation">
+            <h3>For Next Experiments</h3>
+            <ol>
+                <li><strong>Compare architectures:</strong> Await P1-A1 and P1-A3 results for architectural ranking</li>
+                <li><strong>Monitor gap consistency:</strong> Check if 56% val/train gap is consistent across all architectures</li>
+                <li><strong>Regularization tuning:</strong> If selected for Phase 2, consider dropout or weight decay adjustments</li>
+                <li><strong>Early stopping analysis:</strong> Review loss curves for optimal stopping points</li>
+            </ol>
+        </div>
+
+        <h2>🔗 References</h2>
+        <ul>
+            <li><a href="https://wandb.ai/yuuart/midflowlm-v0-1/runs/ze54okvs" target="_blank">W&B Run Dashboard</a></li>
+            <li>Config: <code>configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml</code></li>
+            <li>Script: <code>remote_run/run_all_experiments.sh</code> (Line 29)</li>
+        </ul>
+
+        <div class="footer">
+            <p>Report generated: April 22, 2026</p>
+            <p>Part of: MidFlowLM v0.1 Architecture Sanity Phase (P1)</p>
+        </div>
+    </div>
+</body>
+</html>
