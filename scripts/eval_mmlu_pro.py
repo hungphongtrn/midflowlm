@@ -250,6 +250,8 @@ Answer:"""
 def extract_answer(text: str, valid_options: List[str]) -> str:
     """Extract the answer letter from model output using robust regex patterns.
 
+    Handles various formats including markdown bold, parenthetical prefixes, and colons.
+
     Args:
         text: Model-generated text
         valid_options: List of valid option letters
@@ -263,7 +265,15 @@ def extract_answer(text: str, valid_options: List[str]) -> str:
     # Create a set for faster lookup (lowercase for comparison)
     valid_set = set(opt.lower() for opt in valid_options)
 
-    # Pattern 1: "answer is X" or "the answer is X" (case insensitive)
+    # Pattern 1: Markdown bold answer: **C** or **Answer: C** or **answer is C**
+    # Examples: "(A)answer is **C**" -> extract C, "**Answer: I**" -> extract I
+    match = re.search(r"\*\*\s*(?:answer\s*[:is]+\s*)?\(?([a-j])\)?\s*\*\*", text_lower)
+    if match:
+        answer = match.group(1).upper()
+        if answer.lower() in valid_set:
+            return answer
+
+    # Pattern 2: "answer is X" or "the answer is X" (case insensitive)
     # Matches: "answer is a", "the answer is b", "answer is (c)"
     match = re.search(r"(?:the\s+)?answer\s+is\s+\(?([a-j])\)?", text_lower)
     if match:
@@ -271,7 +281,7 @@ def extract_answer(text: str, valid_options: List[str]) -> str:
         if answer.lower() in valid_set:
             return answer
 
-    # Pattern 2: "answer: X" or "Answer: X" (case insensitive)
+    # Pattern 3: "answer: X" or "Answer: X" (case insensitive)
     # Matches: "answer: a", "Answer: B", "answer: (c)"
     match = re.search(r"answer:\s*\(?([a-j])\)?", text_lower)
     if match:
@@ -279,16 +289,23 @@ def extract_answer(text: str, valid_options: List[str]) -> str:
         if answer.lower() in valid_set:
             return answer
 
-    # Fallback: Try to find single letter at start (original behavior, case insensitive)
+    # Pattern 4: Letter in markdown bold anywhere: **A**, **B**, **(C)**
+    match = re.search(r"\*\*\s*\(?([a-j])\)?\s*\*\*", text_lower)
+    if match:
+        answer = match.group(1).upper()
+        if answer.lower() in valid_set:
+            return answer
+
+    # Fallback 1: Try to find single letter at start (original behavior, case insensitive)
     if len(text_lower) > 0 and text_lower[0] in valid_set:
         return text_lower[0].upper()
 
-    # Fallback: Try to find pattern like "A." or "(A)" or "A)" at start
+    # Fallback 2: Try to find pattern like "A." or "(A)" or "A)" at start
     match = re.match(r"^[\(\[]?([a-j])[\)\]\.]?\s*", text_lower)
     if match and match.group(1) in valid_set:
         return match.group(1).upper()
 
-    # Fallback: Try to find standalone option letters anywhere in text
+    # Fallback 3: Try to find standalone option letters anywhere in text
     for opt in valid_options:
         opt_lower = opt.lower()
         # Pattern: word boundary + option + word boundary
