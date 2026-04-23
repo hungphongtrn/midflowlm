@@ -12,3 +12,7 @@ outputs/uv.lock
 # Environment and local config
 .env
 opencode.json
+
+# Evaluation results
+eval_results/
+

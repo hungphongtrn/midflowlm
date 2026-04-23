@@ -84,6 +84,7 @@ P1-A3: Flow Midblock (T ∈ [2,4,6,8] during training)
 
 import argparse
 import csv
+import gc
 import json
 import logging
 import random
@@ -115,6 +116,40 @@ def setup_logging(log_level: str = "INFO") -> logging.Logger:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     return logging.getLogger(__name__)
+
+
+def aggressive_gpu_cleanup(device: str):
+    """Aggressively clean up GPU memory to prevent OOM and illegal memory access.
+
+    This function:
+    1. Synchronizes CUDA to ensure all operations complete
+    2. Deletes any lingering tensors on GPU
+    3. Runs Python garbage collection
+    4. Clears CUDA cache
+    5. Synchronizes again to ensure cleanup is complete
+
+    Args:
+        device: Device string ("cuda" or "cpu")
+    """
+    if device != "cuda" or not torch.cuda.is_available():
+        return
+
+    # Synchronize to ensure all CUDA operations complete
+    torch.cuda.synchronize()
+
+    # Collect garbage to free any circular references
+    gc.collect()
+
+    # Clear CUDA cache
+    torch.cuda.empty_cache()
+
+    # Synchronize again to ensure cache clearing is complete
+    torch.cuda.synchronize()
+
+    # Log memory status for debugging
+    allocated = torch.cuda.memory_allocated() / 1024**3
+    reserved = torch.cuda.memory_reserved() / 1024**3
+    logger.debug(f"GPU cleanup complete: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
 
 
 def load_config(config_path: str) -> dict:
@@ -305,55 +340,81 @@ def generate_with_model(
     first_token_id = -1
 
     model.eval()
-    with torch.no_grad():
-        current_input_ids = input_ids
-        current_attention_mask = attention_mask
+    try:
+        with torch.no_grad():
+            current_input_ids = input_ids
+            current_attention_mask = attention_mask
 
-        for i in range(max_new_tokens):
-            # Forward pass
-            if is_student:
-                logits = model(
-                    input_ids=current_input_ids,
-                    attention_mask=current_attention_mask,
-                    num_steps=num_steps,
+            for i in range(max_new_tokens):
+                # Forward pass
+                if is_student:
+                    logits = model(
+                        input_ids=current_input_ids,
+                        attention_mask=current_attention_mask,
+                        num_steps=num_steps,
+                    )
+                else:
+                    logits = model(current_input_ids, num_steps=num_steps)
+
+                # Synchronize to catch any CUDA errors early
+                if device == "cuda":
+                    torch.cuda.synchronize()
+
+                # Get next token prediction (greedy)
+                next_token_logits = logits[:, -1, :]
+                next_token = next_token_logits.argmax(dim=-1, keepdim=True)
+                
+                # Safely get token ID - move to CPU first to avoid illegal memory access
+                token_id = int(next_token.cpu().item())
+
+                # Track first token ID
+                if i == 0:
+                    first_token_id = token_id
+
+                generated_tokens.append(token_id)
+
+                # Check for EOS
+                if token_id == eos_token_id:
+                    break
+
+                # Append to input for next iteration
+                current_input_ids = torch.cat([current_input_ids, next_token], dim=1)
+                # Extend attention mask
+                new_mask = torch.ones(
+                    (current_attention_mask.size(0), 1),
+                    dtype=current_attention_mask.dtype,
+                    device=current_attention_mask.device,
                 )
-            else:
-                logits = model(current_input_ids, num_steps=num_steps)
+                current_attention_mask = torch.cat([current_attention_mask, new_mask], dim=1)
 
-            # Get next token prediction (greedy)
-            next_token_logits = logits[:, -1, :]
-            next_token = next_token_logits.argmax(dim=-1, keepdim=True)
-            token_id = int(next_token[0].item())
+                # Truncate if getting too long (to avoid OOM)
+                if current_input_ids.size(1) > 2048:
+                    current_input_ids = current_input_ids[:, -1024:]
+                    current_attention_mask = current_attention_mask[:, -1024:]
 
-            # Track first token ID
-            if i == 0:
-                first_token_id = token_id
+                # Delete intermediate tensors to free memory
+                del logits, next_token_logits, next_token, new_mask
+                if device == "cuda":
+                    torch.cuda.synchronize()
 
-            generated_tokens.append(token_id)
+        # Synchronize before decoding
+        if device == "cuda":
+            torch.cuda.synchronize()
 
-            # Check for EOS
-            if token_id == eos_token_id:
-                break
+        # Decode all generated tokens using CPU tensor to save GPU memory
+        generated_tensor_cpu = torch.tensor([generated_tokens])
+        raw_output_with_special = tokenizer.decode(generated_tensor_cpu[0], skip_special_tokens=False)
+        clean_output = tokenizer.decode(generated_tensor_cpu[0], skip_special_tokens=True)
 
-            # Append to input for next iteration
-            current_input_ids = torch.cat([current_input_ids, next_token], dim=1)
-            # Extend attention mask
-            new_mask = torch.ones(
-                (current_attention_mask.size(0), 1),
-                dtype=current_attention_mask.dtype,
-                device=current_attention_mask.device,
-            )
-            current_attention_mask = torch.cat([current_attention_mask, new_mask], dim=1)
+        # Cleanup
+        del generated_tensor_cpu
+        del current_input_ids, current_attention_mask, input_ids, attention_mask
 
-            # Truncate if getting too long (to avoid OOM)
-            if current_input_ids.size(1) > 2048:
-                current_input_ids = current_input_ids[:, -1024:]
-                current_attention_mask = current_attention_mask[:, -1024:]
-
-    # Decode all generated tokens
-    generated_tensor = torch.tensor([generated_tokens], device=device)
-    raw_output_with_special = tokenizer.decode(generated_tensor[0], skip_special_tokens=False)
-    clean_output = tokenizer.decode(generated_tensor[0], skip_special_tokens=True)
+    except RuntimeError as e:
+        logger.error(f"CUDA error during generation: {e}")
+        # Cleanup on error
+        aggressive_gpu_cleanup(device)
+        raise
 
     return raw_output_with_special, clean_output, first_token_id
 
@@ -536,8 +597,7 @@ def run_side_by_side_evaluation(
             result["base_model_correct"] = base_answer == question["correct_answer"]
 
         # Clear cache if using CUDA to free memory for trained models
-        if device == "cuda":
-            torch.cuda.empty_cache()
+        aggressive_gpu_cleanup(device)
 
         # Generate with each trained model at each T value
         for model_name, model in models.items():
@@ -562,19 +622,18 @@ def run_side_by_side_evaluation(
                 result[f"{prefix}_answer"] = model_answer
                 result[f"{prefix}_correct"] = model_answer == question["correct_answer"]
 
-                # Clear cache if using CUDA
-                if device == "cuda":
-                    torch.cuda.empty_cache()
+                # Clear cache after each T value
+                aggressive_gpu_cleanup(device)
 
             # Clear cache after each model in low-memory mode
-            if low_memory and device == "cuda":
-                torch.cuda.empty_cache()
+            if low_memory:
+                aggressive_gpu_cleanup(device)
 
         results.append(result)
 
         # Clear cache after each question in low-memory mode
-        if low_memory and device == "cuda":
-            torch.cuda.empty_cache()
+        if low_memory:
+            aggressive_gpu_cleanup(device)
 
         if (idx + 1) % 10 == 0:
             # Calculate accuracies so far
