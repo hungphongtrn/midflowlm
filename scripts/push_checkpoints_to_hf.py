@@ -4,12 +4,22 @@
 This script uploads trained model checkpoints (P1-A1, P1-A2, P1-A3) to
 HuggingFace Hub for easy download and inference on local machines.
 
-Usage:
-    # Set your HuggingFace token first:
-    export HF_TOKEN=your_hf_token_here
+Authentication (checked in order):
+    1. --token argument
+    2. HF_TOKEN environment variable  
+    3. HUGGING_FACE_HUB_TOKEN environment variable
+    4. Locally stored token from `huggingface-cli login`
 
-    # Push all Phase 1 checkpoints:
+Usage:
+    # If already logged in via huggingface-cli, just run:
     uv run python scripts/push_checkpoints_to_hf.py --all
+
+    # Or set token via environment variable:
+    export HF_TOKEN=your_hf_token_here
+    uv run python scripts/push_checkpoints_to_hf.py --all
+
+    # Or use --token directly:
+    uv run python scripts/push_checkpoints_to_hf.py --all --token your_token_here
 
     # Push specific checkpoints:
     uv run python scripts/push_checkpoints_to_hf.py --p1-a1 --p1-a2
@@ -59,6 +69,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 try:
     from huggingface_hub import HfApi, create_repo, upload_file, hf_hub_download
     from huggingface_hub.utils import RepositoryNotFoundError
+    from huggingface_hub.constants import HF_TOKEN_PATH
+    from huggingface_hub._login import get_token
 except ImportError:
     print("Error: huggingface_hub not installed. Install with: uv add huggingface-hub")
     sys.exit(1)
@@ -458,8 +470,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Push all checkpoints (requires HF_TOKEN env var):
+  # If already logged in via huggingface-cli:
   uv run python scripts/push_checkpoints_to_hf.py --all
+
+  # Or with explicit token:
+  uv run python scripts/push_checkpoints_to_hf.py --all --token YOUR_TOKEN
+
+  # Or with environment variable:
+  HF_TOKEN=YOUR_TOKEN uv run python scripts/push_checkpoints_to_hf.py --all
 
   # Push specific checkpoints:
   uv run python scripts/push_checkpoints_to_hf.py --p1-a1 --p1-a2
@@ -469,6 +487,12 @@ Examples:
 
   # Download checkpoints locally:
   uv run python scripts/push_checkpoints_to_hf.py --download --p1-a3 --local-dir ./models
+
+Authentication Methods (checked in order):
+  1. --token argument
+  2. HF_TOKEN environment variable
+  3. HUGGING_FACE_HUB_TOKEN environment variable
+  4. Token from `huggingface-cli login` (stored in ~/.huggingface/token)
         """,
     )
 
@@ -489,7 +513,7 @@ Examples:
         "--token",
         type=str,
         default=None,
-        help="HuggingFace Hub token (or set HF_TOKEN env var)",
+        help="HuggingFace Hub token (falls back to HF_TOKEN env var or huggingface-cli login)",
     )
 
     # Download options
@@ -507,12 +531,40 @@ Examples:
 
     args = parser.parse_args()
 
-    # Get token
-    token = args.token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-    if not token and not args.download:
-        logger.error("HuggingFace token required. Set HF_TOKEN env var or use --token")
-        logger.error("Get your token from: https://huggingface.co/settings/tokens")
-        sys.exit(1)
+    # Get token from various sources (in order of priority):
+    # 1. --token argument
+    # 2. HF_TOKEN environment variable
+    # 3. HUGGING_FACE_HUB_TOKEN environment variable
+    # 4. Locally stored token from `huggingface-cli login`
+    token = (
+        args.token 
+        or os.environ.get("HF_TOKEN") 
+        or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        or get_token()  # Reads from ~/.huggingface/token
+    )
+    
+    if not token:
+        if args.download:
+            logger.warning("No token found. Public repos may still work, but private repos require authentication.")
+        else:
+            logger.error("HuggingFace token required to push checkpoints.")
+            logger.error("Options:")
+            logger.error("  1. Login with CLI: huggingface-cli login")
+            logger.error("  2. Set HF_TOKEN environment variable")
+            logger.error("  3. Use --token argument")
+            logger.error("Get your token from: https://huggingface.co/settings/tokens")
+            sys.exit(1)
+    else:
+        # Verify token source for user clarity
+        if args.token:
+            logger.info("Using token from --token argument")
+        elif os.environ.get("HF_TOKEN"):
+            logger.info("Using token from HF_TOKEN environment variable")
+        elif os.environ.get("HUGGING_FACE_HUB_TOKEN"):
+            logger.info("Using token from HUGGING_FACE_HUB_TOKEN environment variable")
+        elif get_token():
+            logger.info(f"Using token from locally stored credentials ({HF_TOKEN_PATH})")
+            logger.info("(You logged in via: huggingface-cli login)")
 
     # Determine which experiments to process
     experiments_to_process = []
