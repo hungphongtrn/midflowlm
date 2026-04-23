@@ -29,20 +29,45 @@ P1-A2: Shared Recurrent Residual (T ∈ [1, 2, 4, 8])
   W&B Run: ze54okvs (stilted-paper-3)
   Training: Multi-step with T ∈ [2,4,6,8], Endpoint + KL loss, Mix B
   Eval T values: [1, 2, 4, 8]
-  
+
   Evaluation Commands:
     T=1:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 1 --num-samples 72 --max-new-tokens 256
     T=2:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 2 --num-samples 72 --max-new-tokens 256
     T=4:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 4 --num-samples 72 --max-new-tokens 256
     T=8:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 8 --num-samples 72 --max-new-tokens 256
-  
+
   Expected: Performance should improve with more steps (T=4,8 > T=1,2)
   Baseline: Teacher model (full Qwen3.5-0.8B) = 25.0% accuracy
+
+P1-A3: Flow Midblock (T ∈ [1, 2, 4, 8])
+  Checkpoint: ./outputs/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468/checkpoints/best.ckpt
+  Config: configs/v0_1_matrix/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468.yaml
+  W&B Run: 5q0mthbl (major-gorge-4)
+  Training: Flow Midblock, continuous time sampling, T ∈ [2,4,6,8], Endpoint + KL loss, Mix B
+  Eval T values: [1, 2, 4, 8]
+  Architecture: flow_midblock with timestep_plus_layer_boundary conditioning
+
+  Evaluation Commands:
+    T=1:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 1 --num-samples 72 --max-new-tokens 256
+    T=2:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 2 --num-samples 72 --max-new-tokens 256
+    T=4:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 4 --num-samples 72 --max-new-tokens 256
+    T=8:  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 8 --num-samples 72 --max-new-tokens 256
+
+  Expected: Performance should be similar to P1-A2 with potential improvements at higher T
+  Baseline: Teacher model (full Qwen3.5-0.8B) = 25.0% accuracy
+
+CSV Comparison:
+  To compare experiments side-by-side with CSV output:
+    python scripts/eval_mmlu_pro.py --config <config> --checkpoint <ckpt> --num-steps 1 2 4 8 --csv-output results.csv --experiment-id P1-A2
+  
+  Then aggregate multiple experiments:
+    python scripts/eval_mmlu_pro.py --csv-aggregate results_P1A2.csv results_P1A3.csv --csv-output comparison.csv
 
 ================================================================================
 """
 
 import argparse
+import csv
 import json
 import logging
 import random
@@ -86,6 +111,7 @@ class MMLUProResult:
     raw_output_token: int
     raw_output_text: str
     category: str = "unknown"
+    experiment_id: str = ""  # For tracking which experiment this belongs to
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -101,6 +127,7 @@ class MMLUProResult:
             "raw_output_token": self.raw_output_token,
             "raw_output_text": self.raw_output_text,
             "category": self.category,
+            "experiment_id": self.experiment_id,
         }
 
 
@@ -115,6 +142,7 @@ class MMLUProReport:
     num_steps: int
     avg_latency_ms: float
     detailed_results: List[Dict[str, Any]]
+    experiment_id: str = ""  # For tracking which experiment this belongs to
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -125,11 +153,13 @@ class MMLUProReport:
             "num_steps": self.num_steps,
             "avg_latency_ms": self.avg_latency_ms,
             "detailed_results": self.detailed_results,
+            "experiment_id": self.experiment_id,
         }
 
     def summary(self) -> str:
         return (
-            f"Model: {self.model_name} (T={self.num_steps})\n"
+            f"Model: {self.model_name} (T={self.num_steps})"
+            f"{' [' + self.experiment_id + ']' if self.experiment_id else ''}\n"
             f"Accuracy: {self.accuracy:.2%} ({self.num_correct}/{self.num_total})\n"
             f"Avg Latency: {self.avg_latency_ms:.2f} ms"
         )
@@ -404,6 +434,7 @@ def evaluate_question(
     model_name: str,
     is_student: bool = True,
     max_new_tokens: int = 256,
+    experiment_id: str = "",
 ) -> Tuple[MMLUProResult, float]:
     """Evaluate a single MMLU-Pro question.
 
@@ -416,6 +447,7 @@ def evaluate_question(
         model_name: Name of the model
         is_student: Whether this is a student model
         max_new_tokens: Maximum tokens to generate (default 256)
+        experiment_id: Optional experiment identifier for tracking
 
     Returns:
         Tuple of (MMLUProResult, latency_ms)
@@ -463,6 +495,7 @@ def evaluate_question(
         raw_output_token=int(generated_ids[0][0].item()) if len(generated_ids[0]) > 0 else -1,
         raw_output_text=raw_output_text,
         category=question.get("category", "unknown"),
+        experiment_id=experiment_id,
     )
 
     return result, latency_ms
@@ -477,6 +510,7 @@ def evaluate_model_on_mmlu_pro(
     model_name: str,
     is_student: bool = True,
     max_new_tokens: int = 256,
+    experiment_id: str = "",
 ) -> MMLUProReport:
     """Evaluate a model on the full MMLU-Pro set.
 
@@ -489,6 +523,7 @@ def evaluate_model_on_mmlu_pro(
         model_name: Name of the model
         is_student: Whether this is a student model
         max_new_tokens: Maximum tokens to generate per question
+        experiment_id: Optional experiment identifier for tracking
 
     Returns:
         MMLUProReport with aggregated results
@@ -496,7 +531,8 @@ def evaluate_model_on_mmlu_pro(
     logger = logging.getLogger(__name__)
     logger.info(
         f"Evaluating {model_name} with T={num_steps} on {len(questions)} questions "
-        f"(max_new_tokens={max_new_tokens})..."
+        f"(max_new_tokens={max_new_tokens})"
+        f"{' [' + experiment_id + ']' if experiment_id else ''}..."
     )
 
     results = []
@@ -512,6 +548,7 @@ def evaluate_model_on_mmlu_pro(
             model_name=model_name,
             is_student=is_student,
             max_new_tokens=max_new_tokens,
+            experiment_id=experiment_id,
         )
         results.append(result)
         latencies.append(latency)
@@ -554,6 +591,7 @@ def evaluate_model_on_mmlu_pro(
         num_steps=num_steps,
         avg_latency_ms=avg_latency,
         detailed_results=detailed_results,
+        experiment_id=experiment_id,
     )
 
     return report
@@ -640,6 +678,96 @@ def create_student_model(
     return model
 
 
+def save_results_to_csv(
+    results: List[Dict[str, Any]],
+    output_path: str,
+    experiment_id: str = "",
+    append: bool = False,
+):
+    """Save evaluation results to CSV format for side-by-side comparison.
+
+    Args:
+        results: List of result dictionaries from evaluation
+        output_path: Path to save CSV file
+        experiment_id: Optional experiment identifier to tag results
+        append: Whether to append to existing file (for aggregating multiple experiments)
+    """
+    output_path = Path(output_path)
+
+    # Determine if we need to write header
+    write_header = not append or not output_path.exists()
+
+    # Define CSV columns
+    fieldnames = [
+        "experiment_id",
+        "model_name",
+        "num_steps",
+        "accuracy",
+        "num_correct",
+        "num_total",
+        "avg_latency_ms",
+    ]
+
+    mode = "a" if append else "w"
+    with open(output_path, mode, newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+        if write_header:
+            writer.writeheader()
+
+        for result in results:
+            row = {
+                "experiment_id": experiment_id or result.get("experiment_id", ""),
+                "model_name": result.get("model_name", ""),
+                "num_steps": result.get("num_steps", 0),
+                "accuracy": f"{result.get('accuracy', 0):.4f}",
+                "num_correct": result.get("num_correct", 0),
+                "num_total": result.get("num_total", 0),
+                "avg_latency_ms": f"{result.get('avg_latency_ms', 0):.2f}",
+            }
+            writer.writerow(row)
+
+    logger.info(f"Results {'appended to' if append else 'saved to'} {output_path}")
+
+
+def aggregate_csv_results(
+    input_files: List[str],
+    output_path: str,
+):
+    """Aggregate multiple CSV result files into a single comparison file.
+
+    Args:
+        input_files: List of CSV file paths to aggregate
+        output_path: Path for the aggregated output CSV
+    """
+    all_rows = []
+
+    for input_file in input_files:
+        input_path = Path(input_file)
+        if not input_path.exists():
+            logger.warning(f"File not found: {input_file}, skipping...")
+            continue
+
+        with open(input_path, "r", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                all_rows.append(row)
+
+    # Write aggregated results
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if all_rows:
+        fieldnames = list(all_rows[0].keys())
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(all_rows)
+        logger.info(f"Aggregated {len(all_rows)} rows from {len(input_files)} files to {output_path}")
+    else:
+        logger.warning("No data to aggregate")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Evaluate models on MMLU-Pro",
@@ -651,8 +779,14 @@ Examples:
   # P1-A2: Shared recurrent residual - evaluate all T values
   python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 1 2 4 8 --num-samples 72 --max-new-tokens 256
 
+  # P1-A3: Flow midblock - evaluate all T values with CSV output
+  python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468.yaml --checkpoint ./outputs/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468/checkpoints/best.ckpt --num-steps 1 2 4 8 --num-samples 72 --max-new-tokens 256 --csv-output results_P1A3.csv --experiment-id P1-A3
+
   # Teacher baseline
   python scripts/eval_mmlu_pro.py --config configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml --num-samples 72
+
+  # Aggregate multiple experiment results
+  python scripts/eval_mmlu_pro.py --csv-aggregate results_P1A2.csv results_P1A3.csv --csv-output comparison.csv
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -696,11 +830,38 @@ Examples:
         default=256,
         help="Maximum new tokens to generate per question (default: 256)",
     )
+    parser.add_argument(
+        "--csv-output",
+        type=str,
+        default=None,
+        help="Path to save results in CSV format for side-by-side comparison",
+    )
+    parser.add_argument(
+        "--experiment-id",
+        type=str,
+        default="",
+        help="Experiment identifier (e.g., 'P1-A2', 'P1-A3') for tracking in CSV",
+    )
+    parser.add_argument(
+        "--csv-aggregate",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Aggregate multiple CSV files for comparison",
+    )
 
     args = parser.parse_args()
 
     global logger
     logger = setup_logging(args.log_level)
+
+    # Handle CSV aggregation mode
+    if args.csv_aggregate:
+        if not args.csv_output:
+            logger.error("--csv-output is required when using --csv-aggregate")
+            sys.exit(1)
+        aggregate_csv_results(args.csv_aggregate, args.csv_output)
+        return
 
     # Load config
     logger.info(f"Loading config from {args.config}")
@@ -750,6 +911,7 @@ Examples:
         logger.info(f"\n{'=' * 60}")
         logger.info(f"Evaluating student model from checkpoint")
         logger.info(f"Checkpoint: {args.checkpoint}")
+        logger.info(f"Experiment ID: {args.experiment_id or 'Not set'}")
         logger.info(f"Evaluating T values: {num_steps_list}")
         logger.info("=" * 60)
 
@@ -768,6 +930,7 @@ Examples:
                     model_name="trained_midblock",
                     is_student=True,
                     max_new_tokens=args.max_new_tokens,
+                    experiment_id=args.experiment_id,
                 )
 
                 logger.info(f"\n{report.summary()}")
@@ -804,18 +967,21 @@ Examples:
             model_name="teacher_original",
             is_student=True,
             max_new_tokens=args.max_new_tokens,
+            experiment_id="teacher",
         )
 
         logger.info(f"\n{report.summary()}")
         all_results.append(report.to_dict())
 
-    # Save results if output path provided
+    # Save results to JSON if output path provided
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         output_data = {
             "config": str(args.config),
+            "checkpoint": str(args.checkpoint) if args.checkpoint else None,
+            "experiment_id": args.experiment_id,
             "num_samples": args.num_samples,
             "seed": args.seed,
             "device": device,
@@ -825,7 +991,16 @@ Examples:
         with open(output_path, "w") as f:
             json.dump(output_data, f, indent=2)
 
-        logger.info(f"\nResults saved to {output_path}")
+        logger.info(f"\nJSON results saved to {output_path}")
+
+    # Save results to CSV if csv_output path provided
+    if args.csv_output:
+        save_results_to_csv(
+            all_results,
+            args.csv_output,
+            experiment_id=args.experiment_id,
+            append=False,
+        )
 
     logger.info("\nEvaluation complete!")
 
@@ -849,6 +1024,8 @@ Examples:
     if len(student_results) > 1:
         logger.info("\n" + "=" * 60)
         logger.info("T-SWEEP COMPARISON (Student Model)")
+        if args.experiment_id:
+            logger.info(f"Experiment: {args.experiment_id}")
         logger.info("=" * 60)
         logger.info(f"{'T':>3} | {'Accuracy':>10} | {'Correct':>8} | {'vs T=1':>10}")
         logger.info("-" * 40)
@@ -866,6 +1043,17 @@ Examples:
                 f"{result['num_correct']:>3}/{result['num_total']:<4} | "
                 f"{improvement:>10}"
             )
+        logger.info("=" * 60)
+
+    # Cross-experiment comparison hint
+    if args.csv_output and args.experiment_id:
+        logger.info("\n" + "=" * 60)
+        logger.info("CSV OUTPUT GENERATED")
+        logger.info("=" * 60)
+        logger.info(f"File: {args.csv_output}")
+        logger.info(f"Experiment: {args.experiment_id}")
+        logger.info("\nTo compare with other experiments:")
+        logger.info(f"  python scripts/eval_mmlu_pro.py --csv-aggregate results_P1A2.csv {args.csv_output} --csv-output comparison.csv")
         logger.info("=" * 60)
 
 
