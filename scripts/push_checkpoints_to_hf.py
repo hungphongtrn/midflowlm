@@ -209,11 +209,20 @@ This is a trained MidFlowLM student model checkpoint from Phase 1 of the v0.1 ex
 """
 
     if checkpoint_info:
+        val_loss = checkpoint_info.get('val_loss')
+        val_loss_str = f"{val_loss:.4f}" if val_loss is not None else "N/A"
+
+        total_params = checkpoint_info.get('total_params')
+        total_params_str = f"{total_params:,}" if total_params is not None else "N/A"
+
+        trainable_params = checkpoint_info.get('trainable_params')
+        trainable_params_str = f"{trainable_params:,}" if trainable_params is not None else "N/A"
+
         readme += f"""- **Global step:** {checkpoint_info.get('global_step', 'N/A')}
 - **Epoch:** {checkpoint_info.get('epoch', 'N/A')}
-- **Validation loss:** {checkpoint_info.get('val_loss', 'N/A'):.4f}
-- **Total parameters:** {checkpoint_info.get('total_params', 'N/A'):,}
-- **Trainable parameters:** {checkpoint_info.get('trainable_params', 'N/A'):,}
+- **Validation loss:** {val_loss_str}
+- **Total parameters:** {total_params_str}
+- **Trainable parameters:** {trainable_params_str}
 
 """
 
