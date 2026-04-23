@@ -465,6 +465,22 @@ def download_checkpoint_locally(
         )
         logger.info(f"  ✓ experiment_info.json -> {info_path}")
 
+        # Create best.ckpt symlink for compatibility with eval scripts
+        import os
+        subdir_path = os.path.join(local_dir, subdir)
+        best_ckpt_path = os.path.join(subdir_path, "best.ckpt")
+        checkpoint_real_path = os.path.join(subdir_path, "checkpoint.pth")
+
+        if os.path.exists(checkpoint_real_path) and not os.path.exists(best_ckpt_path):
+            try:
+                os.symlink("checkpoint.pth", best_ckpt_path)
+                logger.info(f"  ✓ Created best.ckpt -> checkpoint.pth symlink")
+            except OSError:
+                # Fallback: copy the file if symlinks aren't supported (Windows)
+                import shutil
+                shutil.copy2(checkpoint_real_path, best_ckpt_path)
+                logger.info(f"  ✓ Created best.ckpt (copied from checkpoint.pth)")
+
         logger.info(f"✅ Successfully downloaded {exp['name']} to {local_dir}/{subdir}")
         return True
 
