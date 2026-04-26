@@ -675,7 +675,6 @@ Authentication Methods (checked in order):
   4. Token from `huggingface-cli login` (stored in ~/.huggingface/token)
         """,
     )
-    )
 
     # Phase selection
     parser.add_argument("--all", action="store_true", help="Push all checkpoints (P1-P4)")
