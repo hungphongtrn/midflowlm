@@ -64,7 +64,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 # Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
     from huggingface_hub import HfApi, create_repo, upload_file, hf_hub_download
@@ -458,8 +459,8 @@ def push_checkpoint_to_hub(
     exp = EXPERIMENTS[experiment_key]
     api = HfApi(token=token)
 
-    # Check if checkpoint exists
-    checkpoint_path = Path(exp["checkpoint"])
+    # Check if checkpoint exists (resolve relative to project root)
+    checkpoint_path = PROJECT_ROOT / exp["checkpoint"]
     if not checkpoint_path.exists():
         logger.warning(f"⏳ {exp['name']}: Checkpoint not found (training may not be complete)")
         logger.warning(f"   Expected: {checkpoint_path.absolute()}")
@@ -469,8 +470,8 @@ def push_checkpoint_to_hub(
     logger.info(f"Loading checkpoint info for {exp['name']}...")
     checkpoint_info = load_checkpoint_info(str(checkpoint_path))
 
-    # Load config
-    config_path = Path(exp["config"])
+    # Load config (resolve relative to project root)
+    config_path = PROJECT_ROOT / exp["config"]
     if config_path.exists():
         with open(config_path) as f:
             config_data = yaml.safe_load(f)
