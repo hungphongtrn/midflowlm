@@ -61,7 +61,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -442,7 +442,7 @@ def push_checkpoint_to_hub(
     repo_id: str,
     token: str,
     create_if_missing: bool = True,
-) -> bool:
+) -> Union[bool, str]:
     """Push a single checkpoint to HuggingFace Hub.
 
     Args:
@@ -452,7 +452,8 @@ def push_checkpoint_to_hub(
         create_if_missing: Whether to create repo if it doesn't exist
 
     Returns:
-        True if successful, False otherwise
+        True if successful, "skipped" if checkpoint doesn't exist (training incomplete),
+        False if upload failed
     """
     exp = EXPERIMENTS[experiment_key]
     api = HfApi(token=token)
@@ -460,10 +461,9 @@ def push_checkpoint_to_hub(
     # Check if checkpoint exists
     checkpoint_path = Path(exp["checkpoint"])
     if not checkpoint_path.exists():
-        logger.error(f"Checkpoint not found: {checkpoint_path}")
-        logger.error(f"Please ensure training has completed and checkpoint exists at:")
-        logger.error(f"  {checkpoint_path.absolute()}")
-        return False
+        logger.warning(f"⏳ {exp['name']}: Checkpoint not found (training may not be complete)")
+        logger.warning(f"   Expected: {checkpoint_path.absolute()}")
+        return "skipped"  # Special return value to indicate skipped (not failed)
 
     # Load checkpoint info
     logger.info(f"Loading checkpoint info for {exp['name']}...")
@@ -832,15 +832,25 @@ Authentication Methods (checked in order):
 
     # Process each experiment
     success_count = 0
+    skipped_count = 0
+    failed_count = 0
+    
     for exp_key in experiments_to_process:
         if args.download:
             # Download mode
             if download_checkpoint_locally(exp_key, args.repo_id, args.local_dir, token):
                 success_count += 1
+            else:
+                failed_count += 1
         else:
             # Upload mode
-            if push_checkpoint_to_hub(exp_key, args.repo_id, token):
+            result = push_checkpoint_to_hub(exp_key, args.repo_id, token)
+            if result is True:
                 success_count += 1
+            elif result == "skipped":
+                skipped_count += 1
+            else:
+                failed_count += 1
 
     # Summary
     total = len(experiments_to_process)
@@ -851,8 +861,13 @@ Authentication Methods (checked in order):
         logger.info(f"{'=' * 60}")
     else:
         logger.info(f"\n{'=' * 60}")
-        logger.info(f"Push Summary: {success_count}/{total} successful")
-        logger.info(f"Repository: https://huggingface.co/{args.repo_id}")
+        logger.info(f"Push Summary for {args.repo_id}")
+        logger.info(f"{'=' * 60}")
+        logger.info(f"  ✅ Uploaded:   {success_count}/{total}")
+        logger.info(f"  ⏳ Skipped:    {skipped_count}/{total} (training incomplete)")
+        logger.info(f"  ❌ Failed:     {failed_count}/{total}")
+        logger.info(f"  ─────────────────────────")
+        logger.info(f"  Total:        {total}")
         logger.info(f"{'=' * 60}")
 
         if success_count == total:
@@ -861,10 +876,14 @@ Authentication Methods (checked in order):
             logger.info(f"  export HF_TOKEN=your_token_here")
             for exp_key in experiments_to_process:
                 subdir = EXPERIMENTS[exp_key]["subdir"]
-                logger.info(f"  python scripts/push_checkpoints_to_hf.py --download --{exp_key.replace('_', '-')} --local-dir ./models")
-        else:
-            logger.warning("\n⚠️ Some checkpoints failed to push. Check errors above.")
+                logger.info(f"  uv run python scripts/push_checkpoints_to_hf.py --download --{exp_key.replace('_', '-')} --local-dir ./models")
+        elif failed_count > 0:
+            logger.warning(f"\n⚠️ {failed_count} checkpoint(s) failed to push. Check errors above.")
             sys.exit(1)
+        else:
+            logger.info(f"\n✅ All available checkpoints pushed! {skipped_count} experiment(s) still training.")
+            logger.info("\nTo retry skipped experiments later:")
+            logger.info(f"  uv run python scripts/push_checkpoints_to_hf.py --all --repo-id {args.repo_id}")
 
 
 if __name__ == "__main__":
