@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Push MidFlowLM Phase 1 checkpoints to HuggingFace Hub.
+"""Push MidFlowLM checkpoints to HuggingFace Hub.
 
-This script uploads trained model checkpoints (P1-A1, P1-A2, P1-A3) to
+This script uploads trained model checkpoints (Phase 1, 2, 3, 4) to
 HuggingFace Hub for easy download and inference on local machines.
 
 Authentication (checked in order):
@@ -36,22 +36,22 @@ Usage:
     )
 
 Repository Structure on HF Hub:
-    hungphongtrn/midflowlm-phase1/
-    ├── p1_a1_projector/
-    │   ├── checkpoint.pth          # Model weights
-    │   ├── config.yaml             # Training config
-    │   ├── experiment_info.json    # Metadata (loss, T values, etc.)
-    │   └── README.md               # Model card
+    your-username/midflowlm/
+    ├── p1_a1_projector/           # Phase 1: Architecture
     ├── p1_a2_recurrent_residual/
-    │   ├── checkpoint.pth
-    │   ├── config.yaml
-    │   ├── experiment_info.json
-    │   └── README.md
-    └── p1_a3_flow_midblock/
-        ├── checkpoint.pth
-        ├── config.yaml
-        ├── experiment_info.json
-        └── README.md
+    ├── p1_a3_flow_midblock/
+    ├── p2_l1_endpoint_only/        # Phase 2: Loss Ablation
+    ├── p2_l2_end_kl/
+    ├── p2_l3_end_traj_kl/        # Best config
+    ├── p2_l4_end_traj_kl_ce/
+    ├── p3_d1_mix_a/              # Phase 3: Data Mix
+    ├── p3_d2_mix_b/
+    ├── p3_d3_mix_c/
+    ├── p4_e1_eval_t1/            # Phase 4: T Sweep
+    ├── p4_e2_eval_t2/
+    ├── p4_e3_eval_t4/
+    ├── p4_e4_eval_t8/
+    └── p4_e5_eval_t12/
 
 """
 
@@ -92,35 +92,186 @@ DEFAULT_REPO_ID = "hungphongtrn/midflowlm-phase1"
 
 # Experiment configurations
 EXPERIMENTS = {
+    # Phase 1: Architecture Sanity
     "p1_a1": {
         "name": "P1-A1: One-shot Projector",
         "subdir": "p1_a1_projector",
         "config": "configs/v0_1_matrix/midflow_qwen_8to11_p1_a1_proj_mixb_endkl.yaml",
-        "checkpoint": "./outputs/midflow_qwen_8to11_p1_a1_proj_mixb_endkl/checkpoints/best.ckpt",
+        "checkpoint": "outputs/v0_1_matrix/p1_a1_proj_mixb_endkl/checkpoints/best.ckpt",
         "architecture": "projector",
         "train_T": [1],
         "eval_T": [1],
-        "wandb_run": None,  # Fill in if available
+        "wandb_run": "ihjl2i6s",
+        "phase": 1,
     },
     "p1_a2": {
         "name": "P1-A2: Shared Recurrent Residual",
         "subdir": "p1_a2_recurrent_residual",
         "config": "configs/v0_1_matrix/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468.yaml",
-        "checkpoint": "./outputs/midflow_qwen_8to11_p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt",
+        "checkpoint": "outputs/v0_1_matrix/p1_a2_rrb_mixb_endkl_trainT_r2468/checkpoints/best.ckpt",
         "architecture": "shared_recurrent_residual",
         "train_T": [2, 4, 6, 8],
         "eval_T": [1, 2, 4, 8],
         "wandb_run": "ze54okvs",
+        "phase": 1,
     },
     "p1_a3": {
         "name": "P1-A3: Flow Midblock",
         "subdir": "p1_a3_flow_midblock",
         "config": "configs/v0_1_matrix/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468.yaml",
-        "checkpoint": "./outputs/midflow_qwen_8to11_p1_a3_flow_mixb_endkl_trainT_r2468/checkpoints/best.ckpt",
+        "checkpoint": "outputs/v0_1_matrix/p1_a3_flow_mixb_endkl_trainT_r2468/checkpoints/best.ckpt",
         "architecture": "flow_midblock",
         "train_T": [2, 4, 6, 8],
         "eval_T": [1, 2, 4, 8],
         "wandb_run": "5q0mthbl",
+        "phase": 1,
+    },
+    # Phase 2: Loss Ablation
+    "p2_l1": {
+        "name": "P2-L1: Endpoint-only Loss",
+        "subdir": "p2_l1_endpoint_only",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p2_l1_flow_mixb_end_trainT_r2468.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p2_l1_flow_mixb_end_trainT_r2468/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [1, 2, 4, 8],
+        "wandb_run": "gb55agvq",
+        "phase": 2,
+        "loss_config": "endpoint_only",
+    },
+    "p2_l2": {
+        "name": "P2-L2: End + KL Loss",
+        "subdir": "p2_l2_end_kl",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p2_l2_flow_mixb_endkl_trainT_r2468.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p2_l2_flow_mixb_endkl_trainT_r2468/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [1, 2, 4, 8],
+        "wandb_run": "999lvi8w",
+        "phase": 2,
+        "loss_config": "end_kl",
+    },
+    "p2_l3": {
+        "name": "P2-L3: End + Traj + KL Loss (Best)",
+        "subdir": "p2_l3_end_traj_kl",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p2_l3_flow_mixb_endtrajkl_trainT_r2468.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p2_l3_flow_mixb_endtrajkl_trainT_r2468/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [1, 2, 4, 8],
+        "wandb_run": "3l9gii67",
+        "phase": 2,
+        "loss_config": "end_traj_kl",
+    },
+    "p2_l4": {
+        "name": "P2-L4: End + Traj + KL + CE Loss",
+        "subdir": "p2_l4_end_traj_kl_ce",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p2_l4_flow_mixb_endtrajklce_trainT_r2468.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p2_l4_flow_mixb_endtrajklce_trainT_r2468/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [1, 2, 4, 8],
+        "wandb_run": "4cb8comp",
+        "phase": 2,
+        "loss_config": "end_traj_kl_ce",
+    },
+    # Phase 3: Data Mix Ablation
+    "p3_d1": {
+        "name": "P3-D1: Mix A (FineWeb only)",
+        "subdir": "p3_d1_mix_a",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p3_d1_flow_mixa_endtrajkl_trainT_r2468.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p3_d1_flow_mixa_endtrajkl_trainT_r2468/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [1, 2, 4, 8],
+        "wandb_run": "q66380nm",
+        "phase": 3,
+        "data_mix": "A",
+    },
+    "p3_d2": {
+        "name": "P3-D2: Mix B (FineWeb + UltraChat)",
+        "subdir": "p3_d2_mix_b",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p3_d2_flow_mixb_endtrajkl_trainT_r2468.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p3_d2_flow_mixb_endtrajkl_trainT_r2468/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [1, 2, 4, 8],
+        "wandb_run": None,
+        "phase": 3,
+        "data_mix": "B",
+    },
+    "p3_d3": {
+        "name": "P3-D3: Mix C (Full)",
+        "subdir": "p3_d3_mix_c",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p3_d3_flow_mixc_endtrajkl_trainT_r2468.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p3_d3_flow_mixc_endtrajkl_trainT_r2468/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [1, 2, 4, 8],
+        "wandb_run": None,
+        "phase": 3,
+        "data_mix": "C",
+    },
+    # Phase 4: T Sweep Evaluation
+    "p4_e1": {
+        "name": "P4-E1: Eval T=1",
+        "subdir": "p4_e1_eval_t1",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p4_flow_mixc_endtrajkl_evalT1.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p4_flow_mixc_endtrajkl_evalT1/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [1],
+        "wandb_run": None,
+        "phase": 4,
+        "eval_T_fixed": 1,
+    },
+    "p4_e2": {
+        "name": "P4-E2: Eval T=2",
+        "subdir": "p4_e2_eval_t2",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p4_flow_mixc_endtrajkl_evalT2.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p4_flow_mixc_endtrajkl_evalT2/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [2],
+        "wandb_run": None,
+        "phase": 4,
+        "eval_T_fixed": 2,
+    },
+    "p4_e3": {
+        "name": "P4-E3: Eval T=4",
+        "subdir": "p4_e3_eval_t4",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p4_flow_mixc_endtrajkl_evalT4.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p4_flow_mixc_endtrajkl_evalT4/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [4],
+        "wandb_run": None,
+        "phase": 4,
+        "eval_T_fixed": 4,
+    },
+    "p4_e4": {
+        "name": "P4-E4: Eval T=8",
+        "subdir": "p4_e4_eval_t8",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p4_flow_mixc_endtrajkl_evalT8.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p4_flow_mixc_endtrajkl_evalT8/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [8],
+        "wandb_run": None,
+        "phase": 4,
+        "eval_T_fixed": 8,
+    },
+    "p4_e5": {
+        "name": "P4-E5: Eval T=12",
+        "subdir": "p4_e5_eval_t12",
+        "config": "configs/v0_1_matrix/midflow_qwen_8to11_p4_flow_mixc_endtrajkl_evalT12.yaml",
+        "checkpoint": "outputs/v0_1_matrix/p4_flow_mixc_endtrajkl_evalT12/checkpoints/best.ckpt",
+        "architecture": "flow_midblock",
+        "train_T": [2, 4, 6, 8],
+        "eval_T": [12],
+        "wandb_run": None,
+        "phase": 4,
+        "eval_T_fixed": 12,
     },
 }
 
@@ -491,27 +642,31 @@ def download_checkpoint_locally(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Push MidFlowLM Phase 1 checkpoints to HuggingFace Hub",
+        description="Push MidFlowLM checkpoints (Phase 1-4) to HuggingFace Hub",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # If already logged in via huggingface-cli:
   uv run python scripts/push_checkpoints_to_hf.py --all
 
-  # Or with explicit token:
-  uv run python scripts/push_checkpoints_to_hf.py --all --token YOUR_TOKEN
+  # Push all Phase 2 (loss ablation) experiments:
+  uv run python scripts/push_checkpoints_to_hf.py --all-p2
 
-  # Or with environment variable:
-  HF_TOKEN=YOUR_TOKEN uv run python scripts/push_checkpoints_to_hf.py --all
+  # Push best config (P2-L3) to custom repo:
+  uv run python scripts/push_checkpoints_to_hf.py --p2-l3 --repo-id your-username/midflowlm
 
   # Push specific checkpoints:
-  uv run python scripts/push_checkpoints_to_hf.py --p1-a1 --p1-a2
-
-  # Push to custom repo:
-  uv run python scripts/push_checkpoints_to_hf.py --all --repo-id myusername/myrepo
+  uv run python scripts/push_checkpoints_to_hf.py --p1-a3 --p2-l3 --p3-d2
 
   # Download checkpoints locally:
-  uv run python scripts/push_checkpoints_to_hf.py --download --p1-a3 --local-dir ./models
+  uv run python scripts/push_checkpoints_to_hf.py --download --p2-l3 --local-dir ./models
+
+Phase Selection:
+  --all          Push all 15 experiments (P1-P4)
+  --all-p1       Push Phase 1: Architecture (3 experiments)
+  --all-p2       Push Phase 2: Loss Ablation (4 experiments)
+  --all-p3       Push Phase 3: Data Mix (3 experiments)
+  --all-p4       Push Phase 4: T Sweep (5 experiments)
 
 Authentication Methods (checked in order):
   1. --token argument
@@ -520,12 +675,37 @@ Authentication Methods (checked in order):
   4. Token from `huggingface-cli login` (stored in ~/.huggingface/token)
         """,
     )
+    )
 
-    # Push options
-    parser.add_argument("--all", action="store_true", help="Push all P1 checkpoints")
+    # Phase selection
+    parser.add_argument("--all", action="store_true", help="Push all checkpoints (P1-P4)")
+    parser.add_argument("--all-p1", action="store_true", help="Push all Phase 1 checkpoints")
+    parser.add_argument("--all-p2", action="store_true", help="Push all Phase 2 checkpoints")
+    parser.add_argument("--all-p3", action="store_true", help="Push all Phase 3 checkpoints")
+    parser.add_argument("--all-p4", action="store_true", help="Push all Phase 4 checkpoints")
+
+    # Phase 1: Architecture Sanity
     parser.add_argument("--p1-a1", action="store_true", help="Push P1-A1 (One-shot Projector)")
     parser.add_argument("--p1-a2", action="store_true", help="Push P1-A2 (Shared Recurrent Residual)")
     parser.add_argument("--p1-a3", action="store_true", help="Push P1-A3 (Flow Midblock)")
+
+    # Phase 2: Loss Ablation
+    parser.add_argument("--p2-l1", action="store_true", help="Push P2-L1 (Endpoint-only Loss)")
+    parser.add_argument("--p2-l2", action="store_true", help="Push P2-L2 (End + KL Loss)")
+    parser.add_argument("--p2-l3", action="store_true", help="Push P2-L3 (End + Traj + KL - Best)")
+    parser.add_argument("--p2-l4", action="store_true", help="Push P2-L4 (End + Traj + KL + CE)")
+
+    # Phase 3: Data Mix Ablation
+    parser.add_argument("--p3-d1", action="store_true", help="Push P3-D1 (Mix A - FineWeb only)")
+    parser.add_argument("--p3-d2", action="store_true", help="Push P3-D2 (Mix B - FineWeb + UltraChat)")
+    parser.add_argument("--p3-d3", action="store_true", help="Push P3-D3 (Mix C - Full)")
+
+    # Phase 4: T Sweep Evaluation
+    parser.add_argument("--p4-e1", action="store_true", help="Push P4-E1 (Eval T=1)")
+    parser.add_argument("--p4-e2", action="store_true", help="Push P4-E2 (Eval T=2)")
+    parser.add_argument("--p4-e3", action="store_true", help="Push P4-E3 (Eval T=4)")
+    parser.add_argument("--p4-e4", action="store_true", help="Push P4-E4 (Eval T=8)")
+    parser.add_argument("--p4-e5", action="store_true", help="Push P4-E5 (Eval T=12)")
 
     # Repo options
     parser.add_argument(
@@ -594,17 +774,60 @@ Authentication Methods (checked in order):
     # Determine which experiments to process
     experiments_to_process = []
     if args.all:
-        experiments_to_process = ["p1_a1", "p1_a2", "p1_a3"]
+        experiments_to_process = list(EXPERIMENTS.keys())
+    elif args.all_p1:
+        experiments_to_process = [k for k in EXPERIMENTS.keys() if EXPERIMENTS[k]["phase"] == 1]
+    elif args.all_p2:
+        experiments_to_process = [k for k in EXPERIMENTS.keys() if EXPERIMENTS[k]["phase"] == 2]
+    elif args.all_p3:
+        experiments_to_process = [k for k in EXPERIMENTS.keys() if EXPERIMENTS[k]["phase"] == 3]
+    elif args.all_p4:
+        experiments_to_process = [k for k in EXPERIMENTS.keys() if EXPERIMENTS[k]["phase"] == 4]
     else:
+        # Phase 1
         if args.p1_a1:
             experiments_to_process.append("p1_a1")
         if args.p1_a2:
             experiments_to_process.append("p1_a2")
         if args.p1_a3:
             experiments_to_process.append("p1_a3")
+        # Phase 2
+        if args.p2_l1:
+            experiments_to_process.append("p2_l1")
+        if args.p2_l2:
+            experiments_to_process.append("p2_l2")
+        if args.p2_l3:
+            experiments_to_process.append("p2_l3")
+        if args.p2_l4:
+            experiments_to_process.append("p2_l4")
+        # Phase 3
+        if args.p3_d1:
+            experiments_to_process.append("p3_d1")
+        if args.p3_d2:
+            experiments_to_process.append("p3_d2")
+        if args.p3_d3:
+            experiments_to_process.append("p3_d3")
+        # Phase 4
+        if args.p4_e1:
+            experiments_to_process.append("p4_e1")
+        if args.p4_e2:
+            experiments_to_process.append("p4_e2")
+        if args.p4_e3:
+            experiments_to_process.append("p4_e3")
+        if args.p4_e4:
+            experiments_to_process.append("p4_e4")
+        if args.p4_e5:
+            experiments_to_process.append("p4_e5")
 
     if not experiments_to_process:
-        logger.error("No experiments selected. Use --all or --p1-a1/--p1-a2/--p1-a3")
+        logger.error("No experiments selected.")
+        logger.error("Usage:")
+        logger.error("  --all          Push all experiments (P1-P4)")
+        logger.error("  --all-p1       Push all Phase 1 (architecture)")
+        logger.error("  --all-p2       Push all Phase 2 (loss ablation)")
+        logger.error("  --all-p3       Push all Phase 3 (data mix)")
+        logger.error("  --all-p4       Push all Phase 4 (T sweep)")
+        logger.error("  --p1-a1..--p4-e5  Push specific experiment")
         sys.exit(1)
 
     # Process each experiment
