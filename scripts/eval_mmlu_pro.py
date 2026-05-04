@@ -849,6 +849,11 @@ Examples:
         default=None,
         help="Aggregate multiple CSV files for comparison",
     )
+    parser.add_argument(
+        "--skip-teacher",
+        action="store_true",
+        help="Skip teacher baseline evaluation",
+    )
 
     args = parser.parse_args()
 
@@ -942,8 +947,8 @@ Examples:
             )
             logger.error("Skipping student model evaluation.")
 
-    # Also evaluate the teacher (original model) if no baseline specified
-    if not args.baseline:
+    # Also evaluate the teacher (original model) if no baseline specified and not skipped
+    if not args.baseline and not args.skip_teacher:
         logger.info(f"\n{'=' * 60}")
         logger.info(f"Evaluating teacher model (original Qwen)")
         logger.info("=" * 60)

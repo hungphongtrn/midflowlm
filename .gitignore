@@ -15,4 +15,22 @@ opencode.json
 
 # Evaluation results
 eval_results/
+results/*.json
+results/*.csv
+
+# Large artifacts
+downloads/
+models/
+outputs/
+*.ckpt
+*.pth
+*.safetensors
+
+# Logs
+*.log
+/tmp/*.log
+
+# Temporary files
+*_temp.json
+.cache/
 

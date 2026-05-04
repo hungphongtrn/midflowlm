@@ -294,7 +294,7 @@ show_summary_table() {
     # Show GPU utilization if available
     if command -v nvidia-smi &> /dev/null && [ $NUM_GPUS -gt 0 ]; then
         echo -e "${BLUE}GPU Status:${NC}"
-        nvidia-smi --query-gpu=index,name,temperature.gpu,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -3 | while IFS=, read -r idx name temp util mem_used mem_total; do
+        nvidia-smi --query-gpu=index,name,temperature.gpu,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -$NUM_GPUS | while IFS=, read -r idx name temp util mem_used mem_total; do
             # Trim whitespace
             idx=$(echo "$idx" | xargs)
             name=$(echo "$name" | xargs)
@@ -535,8 +535,21 @@ main() {
                 sleep 5
             done
             
-            # Find available GPU (round-robin)
-            local GPU_ID=$((COMPLETED_COUNT % NUM_GPUS))
+            # Find available GPU (first free one, not round-robin by count)
+            local GPU_ID=0
+            for ((gid=0; gid<NUM_GPUS; gid++)); do
+                local in_use=0
+                for used_gpu in "${GPU_ASSIGNMENTS[@]}"; do
+                    if [ "$used_gpu" = "$gid" ]; then
+                        in_use=1
+                        break
+                    fi
+                done
+                if [ $in_use -eq 0 ]; then
+                    GPU_ID=$gid
+                    break
+                fi
+            done
             
             # Run in background
             run_experiment "$config" "$GPU_ID" &
