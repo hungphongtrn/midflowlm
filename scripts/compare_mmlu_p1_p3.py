@@ -259,6 +259,7 @@ def create_per_question_csv(results: Dict[str, List[Dict]], output_path: str):
     
     # Collect all questions and answers
     questions_data = {}
+    teacher_baseline_added = False
     
     for exp_id, exp_results in results.items():
         for result in exp_results:
@@ -266,7 +267,15 @@ def create_per_question_csv(results: Dict[str, List[Dict]], output_path: str):
                 continue
             
             num_steps = result.get("num_steps", 1)
-            col_name = f"{exp_id}_T{num_steps}"
+            is_teacher = result.get("model_name", "") == "teacher_original"
+            
+            if is_teacher:
+                if teacher_baseline_added:
+                    continue
+                col_name = "Teacher (Baseline)"
+                teacher_baseline_added = True
+            else:
+                col_name = f"{exp_id}_T{num_steps}"
             
             for q_result in result["detailed_results"]:
                 # Use question + options as unique key
@@ -278,22 +287,30 @@ def create_per_question_csv(results: Dict[str, List[Dict]], output_path: str):
                         "options": q_result["options"],
                         "correct_answer": q_result["correct_answer"],
                         "category": q_result.get("category", "unknown"),
+                        "prompt_text": q_result.get("prompt_text", ""),
                         "answers": {},
                         "correctness": {},
+                        "raw_outputs": {},
                     }
                 
-                questions_data[question_key]["answers"][col_name] = q_result["predicted_answer"]
-                questions_data[question_key]["correctness"][col_name] = q_result["is_correct"]
+                if col_name not in questions_data[question_key]["answers"]:
+                    questions_data[question_key]["answers"][col_name] = q_result["predicted_answer"]
+                    questions_data[question_key]["correctness"][col_name] = q_result["is_correct"]
+                    questions_data[question_key]["raw_outputs"][col_name] = q_result.get("raw_output_text", "")
     
-    # Get all checkpoint columns sorted
+    # Get all checkpoint columns sorted, with teacher baseline always first
     all_checkpoints = set()
     for q_data in questions_data.values():
         all_checkpoints.update(q_data["answers"].keys())
-    all_checkpoints = sorted(all_checkpoints)
+    
+    baseline_key = "Teacher (Baseline)"
+    if baseline_key in all_checkpoints:
+        all_checkpoints.remove(baseline_key)
+    all_checkpoints = [baseline_key] + sorted(all_checkpoints) if baseline_key in questions_data[next(iter(questions_data))].get("answers", {}) else sorted(all_checkpoints)
     
     # Write CSV
     with open(output_path, "w", newline="") as f:
-        fieldnames = ["question", "options", "correct_answer", "category"] + all_checkpoints
+        fieldnames = ["question", "options", "correct_answer", "prompt_text", "category"] + all_checkpoints
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         
@@ -302,18 +319,18 @@ def create_per_question_csv(results: Dict[str, List[Dict]], output_path: str):
                 "question": question,
                 "options": str(options),
                 "correct_answer": q_data["correct_answer"],
+                "prompt_text": q_data["prompt_text"],
                 "category": q_data["category"],
             }
             for ckpt in all_checkpoints:
                 answer = q_data["answers"].get(ckpt, "N/A")
                 is_correct = q_data["correctness"].get(ckpt, False)
-                # Show answer with correctness indicator
+                raw = q_data["raw_outputs"].get(ckpt, "")
+                marker = " ✓" if is_correct else " ✗"
                 if answer == "INVALID":
-                    row[ckpt] = "INVALID"
-                elif is_correct:
-                    row[ckpt] = f"{answer} ✓"
+                    row[ckpt] = f"[INVALID]{marker}\n---\n{raw}"
                 else:
-                    row[ckpt] = f"{answer} ✗"
+                    row[ckpt] = f"[{answer}]{marker}\n---\n{raw}"
             writer.writerow(row)
     
     logger.info(f"  ✓ Written {len(questions_data)} questions to {output_path}")
@@ -343,12 +360,13 @@ def create_comprehensive_analysis(
         "worst_performers": {},
     }
     
-    # Find baseline (teacher) - usually has "teacher" in the name
-    baseline_key = None
-    for ckpt in all_checkpoints:
-        if "teacher" in ckpt.lower():
-            baseline_key = ckpt
-            break
+    # Find baseline (teacher) - use the deduplicated teacher column
+    baseline_key = "Teacher (Baseline)" if "Teacher (Baseline)" in all_checkpoints else None
+    if not baseline_key:
+        for ckpt in all_checkpoints:
+            if "teacher" in ckpt.lower():
+                baseline_key = ckpt
+                break
     
     # Calculate accuracy for each checkpoint
     checkpoint_stats = {}
@@ -681,6 +699,11 @@ Examples:
         metavar="JSON_FILE",
         help="Path to JSON file with pre-computed teacher baseline results",
     )
+    parser.add_argument(
+        "--analysis-only",
+        action="store_true",
+        help="Skip evaluation and only build comparison CSV/JSON from existing result files",
+    )
     
     args = parser.parse_args()
     
@@ -738,58 +761,57 @@ Examples:
     logger.info(f"Results dir: {args.results_dir}")
     logger.info("=" * 60)
     
-    # Step 1: Download checkpoints if requested
-    if args.download_checkpoints:
-        logger.info("\nStep 1: Downloading checkpoints from HF Hub...")
-        logger.info("Repository: hungphongtrn/midflowlm-phase1")
+    if args.analysis_only:
+        logger.info("Analysis-only mode: using existing result files, skipping evaluation")
+    else:
+        # Step 1: Download checkpoints if requested
+        if args.download_checkpoints:
+            logger.info("\nStep 1: Downloading checkpoints from HF Hub...")
+            logger.info("Repository: hungphongtrn/midflowlm-phase1")
+            
+            for exp_id in experiments_to_run:
+                exp = EXPERIMENTS[exp_id]
+                download_checkpoint(exp["exp_key"], exp["subdir"], args.checkpoint_dir)
+        
+        # Step 2: Run evaluations
+        logger.info("\nStep 2: Running evaluations...")
+        
+        # Cache teacher results to avoid redundant evaluations
+        cached_teacher_results = None
+        if args.teacher_results:
+            try:
+                with open(args.teacher_results, 'r') as f:
+                    data = json.load(f)
+                    cached_teacher_results = [r for r in data.get('results', []) if r.get('model_name') == 'teacher_original']
+                    logger.info(f"Loaded {len(cached_teacher_results)} cached teacher results from {args.teacher_results}")
+            except Exception as e:
+                logger.warning(f"Could not load teacher results from {args.teacher_results}: {e}")
         
         for exp_id in experiments_to_run:
             exp = EXPERIMENTS[exp_id]
-            download_checkpoint(exp["exp_key"], exp["subdir"], args.checkpoint_dir)
-    
-    # Step 2: Run evaluations
-    logger.info("\nStep 2: Running evaluations...")
-    
-    # Cache teacher results to avoid redundant evaluations
-    cached_teacher_results = None
-    if args.teacher_results:
-        # Load pre-computed teacher results from file
-        try:
-            with open(args.teacher_results, 'r') as f:
-                data = json.load(f)
-                cached_teacher_results = [r for r in data.get('results', []) if r.get('model_name') == 'teacher_original']
-                logger.info(f"Loaded {len(cached_teacher_results)} cached teacher results from {args.teacher_results}")
-        except Exception as e:
-            logger.warning(f"Could not load teacher results from {args.teacher_results}: {e}")
-    
-    for exp_id in experiments_to_run:
-        exp = EXPERIMENTS[exp_id]
-        checkpoint_path = Path(args.checkpoint_dir) / exp["subdir"] / "checkpoint.pth"
-        
-        if not checkpoint_path.exists():
-            logger.warning(f"  {exp_id}: Checkpoint not found at {checkpoint_path}, skipping")
-            continue
-        
-        # Check if we should skip teacher for this experiment
-        skip_teacher = args.skip_teacher and cached_teacher_results is not None
-        
-        result = run_evaluation(
-            exp_id=exp_id,
-            config_path=exp["config"],
-            checkpoint_path=str(checkpoint_path),
-            eval_T=exp["eval_T"],
-            num_samples=args.num_samples,
-            results_dir=args.results_dir,
-            skip_teacher=skip_teacher,
-            teacher_results=cached_teacher_results if skip_teacher else None,
-        )
-        
-        # If this is the first experiment and we don't have cached teacher results yet,
-        # extract them from the result for future experiments
-        if result and not args.skip_teacher and cached_teacher_results is None:
-            cached_teacher_results = [r for r in result.get('results', []) if r.get('model_name') == 'teacher_original']
-            if cached_teacher_results:
-                logger.info(f"  -> Cached {len(cached_teacher_results)} teacher results for reuse in subsequent experiments")
+            checkpoint_path = Path(args.checkpoint_dir) / exp["subdir"] / "checkpoint.pth"
+            
+            if not checkpoint_path.exists():
+                logger.warning(f"  {exp_id}: Checkpoint not found at {checkpoint_path}, skipping")
+                continue
+            
+            skip_teacher = args.skip_teacher and cached_teacher_results is not None
+            
+            result = run_evaluation(
+                exp_id=exp_id,
+                config_path=exp["config"],
+                checkpoint_path=str(checkpoint_path),
+                eval_T=exp["eval_T"],
+                num_samples=args.num_samples,
+                results_dir=args.results_dir,
+                skip_teacher=skip_teacher,
+                teacher_results=cached_teacher_results if skip_teacher else None,
+            )
+            
+            if result and not args.skip_teacher and cached_teacher_results is None:
+                cached_teacher_results = [r for r in result.get('results', []) if r.get('model_name') == 'teacher_original']
+                if cached_teacher_results:
+                    logger.info(f"  -> Cached {len(cached_teacher_results)} teacher results for reuse in subsequent experiments")
     
     # Step 3: Aggregate and create comparison files
     logger.info("\nStep 3: Creating comparison files...")

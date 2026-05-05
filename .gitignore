@@ -13,18 +13,33 @@ outputs/uv.lock
 .env
 opencode.json
 
-# Evaluation results
+# Evaluation results and artifacts
 eval_results/
 results/*.json
+results/*.jsonl
 results/*.csv
+results/*.backup
+*.jsonl
+*_results.json
+*_results.jsonl
 
-# Large artifacts
+# Large artifacts - Model checkpoints, weights, and training outputs
 downloads/
 models/
 outputs/
+checkpoints/
 *.ckpt
 *.pth
 *.safetensors
+*.bin
+*.h5
+*.onnx
+*.pt
+training_outputs/
+experiment_outputs/
+wandb/
+runs/
+logs/
 
 # Logs
 *.log
@@ -33,4 +48,9 @@ outputs/
 # Temporary files
 *_temp.json
 .cache/
+
+# Session archives and temporary notes
+.beans/
+.beans/archive/
+*probe_notes.md
 

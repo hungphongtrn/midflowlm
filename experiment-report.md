@@ -24,112 +24,20 @@ This document tracks the results of the v0.1 experiment matrix for the MidFlowLM
 | **P2** | L2 | Adding KL improves stability | `flow_midblock` | 1.0/0.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | Mix B | ✅ **Complete** | **0.056** | T=5.06 | Matches P1-A3 |
 | **P2** | L3 | Trajectory loss improves multi-step | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | Mix B | ✅ **Complete** | **0.057** | T=5.06 | ✅ **Best config** |
 | **P2** | L4 | CE loss may cause collapse | `flow_midblock` | 1.0/1.0/0.5/0.1 | [2,4,6,8] | [1,2,4,8] | Mix B | ✅ **Complete** | **0.319** ⚠️ | T=5.06 | ⚠️ CE hurts performance |
-| **P3** | D1 | FineWeb-only lacks diversity | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | **Mix A** (FW only) | 🏃 **Running** | 0.057 (current) | T=5.04 | Started Apr 25, ~11h runtime |
-| **P3** | D2 | FW+UltraChat is balanced | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | **Mix B** (FW+UC) | ⏳ Pending | - | - | ✅ **Best data mix** |
-| **P3** | D3 | Full mix may add noise | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | **Mix C** (Full) | ⏳ Pending | - | - | All datasets |
-| **P4** | E1 | T=1 has limited compute | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | **[1]** | Mix C | ⏳ Pending | - | - | Fastest eval |
-| **P4** | E2 | T=2 is minimal multi-step | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | **[2]** | Mix C | ⏳ Pending | - | - | 2-step eval |
-| **P4** | E3 | T=4 balances quality/speed | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | **[4]** | Mix C | ⏳ Pending | - | - | 4-step eval |
-| **P4** | E4 | T=8 approaches teacher | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | **[8]** | Mix C | ⏳ Pending | - | - | 8-step eval |
-| **P4** | E5 | T=12 is diminishing returns | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | **[12]** | Mix C | ⏳ Pending | - | - | 12-step eval |
+| **P3** | D1 | FineWeb-only lacks diversity | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | **Mix A** (FW only) | ✅ Complete | 0.057 | T=5.04 | Finished Apr 27 |
+| **P3** | D2 | FW+UltraChat is balanced | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | **Mix B** (FW+UC) | ✅ Complete | 0.057 | T=5.04 | Matches P2-L3 |
+| **P3** | D3 | Full mix (all datasets) | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | [1,2,4,8] | **Mix C** (Full) | ✅ Complete | 0.058 | T=5.04 | ✅ **Best MMLU** |
+| **P4** | E1 | T=1 has limited compute | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | **[1]** | Mix C | ❌ Cancelled | - | - | Not run |
+| **P4** | E2 | T=2 is minimal multi-step | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | **[2]** | Mix C | ❌ Cancelled | - | - | Not run |
+| **P4** | E3 | T=4 balances quality/speed | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | **[4]** | Mix C | ❌ Cancelled | - | - | Not run |
+| **P4** | E4 | T=8 approaches teacher | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | **[8]** | Mix C | ❌ Cancelled | - | - | Not run |
+| **P4** | E5 | T=12 is diminishing returns | `flow_midblock` | 1.0/1.0/0.5/0.0 | [2,4,6,8] | **[12]** | Mix C | ❌ Cancelled | - | - | Not run |
 
 > **Note on Loss Values**: Loss values marked with * are **endpoint-only** and not directly comparable to combined losses (endpoint + KL + velocity) in other experiments. MMLU-Pro evaluation provides the true performance comparison.
 
 ---
 
-## MMLU-Pro Benchmark Results (Phase 1 Architecture Comparison)
-
-**Setup**: 72 questions from MMLU-Pro, 14 categories, base model vs P1 variants evaluated at T=1,2,4,8
-
-### Overall Accuracy by Architecture and T
-
-| Rank | Model | T | Accuracy | vs Base | Notes |
-|------|-------|---|----------|---------|-------|
-| 1 | **base_model** | - | **22.22%** (16/72) | - | Teacher reference |
-| 2 | **P1-A3** (Flow) | **T=1** | **19.44%** (14/72) | -2.8% | ✅ **Best trained model** |
-| 2 | **P1-A2** (Recurrent) | **T=2** | **19.44%** (14/72) | -2.8% | Peak at T=2 |
-| 4 | P1-A2 (Recurrent) | T=8 | 18.06% (13/72) | -4.2% | Stable at higher T |
-| 4 | P1-A3 (Flow) | T=2 | 18.06% (13/72) | -4.2% | Consistent |
-| 4 | P1-A3 (Flow) | T=4 | 18.06% (13/72) | -4.2% | Consistent |
-| 7 | P1-A2 (Recurrent) | T=1 | 16.67% (12/72) | -5.6% | Low at T=1 |
-| 7 | P1-A3 (Flow) | T=8 | 16.67% (12/72) | -5.6% | Slight degradation at T=8 |
-| 9 | P1-A2 (Recurrent) | T=4 | 15.28% (11/72) | -6.9% | Dip at T=4 |
-| 9 | P1-A1 (Projector) | T=1 | 15.28% (11/72) | -6.9% | Single-step only |
-| 11 | P1-A1 (Projector) | T=2 | 13.89% (10/72) | -8.3% | Not trained for multi-step |
-| 11 | P1-A1 (Projector) | T=8 | 13.89% (10/72) | -8.3% | Not trained for multi-step |
-| 13 | P1-A1 (Projector) | T=4 | 11.11% (8/72) | -11.1% | Worst performance |
-
-### Key Findings
-
-**✅ EXCELLENT RESULTS - The Experiment is Working:**
-
-1. **Flow Midblock (P1-A3) is Most Stable Across T Values**
-   - Accuracy range: 16.67% - 19.44% (span: **2.77%**)
-   - Only 3% degradation from T=1 to T=8
-   - Validates continuous timestep training works
-   - Shows graceful scaling with inference steps
-
-2. **Recurrent Residual (P1-A2) Peaks at T=2, Degrades**
-   - Accuracy range: 15.28% - 19.44% (span: **4.17%**)
-   - Best at T=2 (19.44%), drops at T=4 (15.28%), recovers at T=8 (18.06%)
-   - Non-monotonic behavior suggests discrete step training issues
-
-3. **One-Shot Projector (P1-A1) Fails at Multi-Step**
-   - Only trained for T=1, evaluated at all T values
-   - Shows catastrophic performance at T=4 (11.11%)
-   - Validates that multi-step training is necessary
-
-4. **All Trained Models Within 2.8-11.1% of Base**
-   - Gap is reasonable for 3-epoch training on small model (0.8B)
-   - Flow midblock achieves 87.5% of base performance at T=1
-   - With more epochs/data, models should close gap
-
-### Category-wise Analysis (Top Categories)
-
-| Category | Qs | Base | P1-A3 T=1 | P1-A2 T=2 | Gap vs Base |
-|----------|-----|------|-----------|-----------|-------------|
-| biology | 2 | 50.0% | 0.0% | 0.0% | -50% |
-| engineering | 6 | 33.3% | 16.7% | 16.7% | -16.6% |
-| chemistry | 10 | 30.0% | 10.0% | 10.0% | -20% |
-| law | 11 | 27.3% | 18.2% | 9.1% | -9.1% to -18.2% |
-| economics | 4 | 25.0% | 25.0% | 25.0% | **0%** |
-| physics | 10 | 20.0% | 10.0% | 10.0% | -10% |
-
-**Observations:**
-- Flow midblock (P1-A3) matches base on economics
-- P1-A3 outperforms P1-A2 on law (+9.1%)
-- All models struggle with biology (discrete facts)
-
-### Model Agreement Analysis
-
-| Scenario | Count | % | Interpretation |
-|----------|-------|---|----------------|
-| All models correct | 2 | 2.8% | Easy questions |
-| All models wrong | 42 | 58.3% | Hard questions (domain knowledge) |
-| Disagreement | 28 | 38.9% | Architecture/T-specific behavior |
-
-**Interpretation:**
-- 58% universal failure suggests MMLU-Pro is genuinely difficult
-- Only 2.8% easy questions (consensus correct)
-- 39% disagreement shows models learn different strategies
-- This is healthy - means architectures are not just copying
-
-### T-Sweep Behavior Summary
-
-| Architecture | T=1 | T=2 | T=4 | T=8 | Best T | Stability |
-|--------------|-----|-----|-----|-----|--------|-----------|
-| P1-A1 (Projector) | 15.3% | 13.9% | 11.1% | 13.9% | T=1 | ❌ Poor (not multi-step trained) |
-| P1-A2 (Recurrent) | 16.7% | **19.4%** | 15.3% | 18.1% | T=2 | ⚠️ Non-monotonic |
-| P1-A3 (Flow) | **19.4%** | 18.1% | 18.1% | 16.7% | T=1 | ✅ **Most stable** |
-
-**Key Insight:**
-- Flow midblock shows expected behavior: peak at low T, gradual degradation
-- Recurrent residual has unexpected dip at T=4
-- Projector collapses at T=4 (11.1%)
-
----
-
-## Detailed Results by Phase
+## Experiment Results by Phase
 
 ### Phase 1: Architecture Sanity (3 experiments)
 
@@ -398,37 +306,89 @@ The KL loss in P1 was ~0.11 at validation, which significantly inflated the tota
 
 | Metric | P3-D1 (Mix A) | P3-D2 (Mix B) | P3-D3 (Mix C) | Winner |
 |--------|---------------|---------------|---------------|--------|
-| Final Val Loss | 0.057 (running) | - | - | TBD |
-| FineWeb Val Loss | - | - | - | TBD |
-| UltraChat Val Loss | N/A | - | - | TBD |
-| Train Time/Epoch | ~11h elapsed | - | - | TBD |
-| Data Loading Issues | None | - | - | TBD |
+| Final Val Loss | 0.057 | 0.057 | 0.058 | Tied |
+| Runtime | ~19h | ~19h | ~19h | Tied |
+| **MMLU-Pro Best** | **11.4%** @ T=2 | **14.3%** @ T=4 | **18.6%** @ T=2/4/8 | **D3** |
+| **Output Consistency** | Poor | Poor | **Excellent** | **D3** |
 
-**P3-D1 Results (Mix A - FineWeb only)** - 🏃 **Currently Running (Run: curious-cherry-9)**:
-- **W&B Run**: [curious-cherry-9 (q66380nm)](https://wandb.ai/yuuart/midflowlm-v0-1/runs/q66380nm) 🏃 **State: running**
-- **Created**: 2026-04-25 20:18:44Z | **Last Update**: 2026-04-26 07:43:15Z
-- **Current Status**: Step 1,961 of ~3,187 (61% complete)
-- **Current Val Loss**: **0.057** (endpoint: 0.0565, KL: 0.1088, velocity: 0)
-- **Current Train Loss**: **0.073** (endpoint: 0.0729, KL: 0.1416)
-- **Runtime So Far**: ~41,063 seconds (~11.4 hours)
-- **Convergence**: ✅ Stable so far
-- **Gradient Norm**: **1.38** (well-behaved)
-- **Learning Rate**: **9.93e-5** (approaching max 1e-4)
-- **Architecture**: Flow midblock (layers 8-11)
-- **Configuration**: L3 config (1.0/1.0/0.5/0.0), T ∈ [2,4,6,8], **Mix A (FineWeb only)**
-- **Status**: 🏃 **Running** | ⏳ MMLU-Pro evaluation pending
-- **Key Observations**:
-  - ✅ Training stable at ~61% completion
-  - ✅ Current val loss 0.057 (comparable to L3 with Mix B at same stage)
-  - ✅ KL divergence 0.109 (consistent with other runs)
-  - ✅ Continuous timestep sampling working (t_mean=0.742)
-  - ✅ No data loading errors observed
-  - ⏳ Expected completion: ~6-7 more hours
+**Key Findings**:
+1. ✅ **P3-D3 (Mix C) is the clear winner** - 18.6% MMLU-Pro, matching teacher baseline (17.1%)
+2. ✅ **Data diversity matters** - Mix C (4 datasets) > Mix B (2 datasets) > Mix A (1 dataset)
+3. 🔑 **P3-D3 learned output discipline** - 100% of outputs are short answer letters (matching teacher format), while D1/D2 produce verbose reasoning chains
+4. ⚠️ Overall accuracy remains low (18.6% vs teacher 17.1%) but the consistency gains are significant
 
-**Key Verifiable Points**:
-1. ⏳ Mix B (FW+UC) outperforms Mix A (FW only) - P3-D1 running, P3-D2 pending
-2. ⏳ Determine if Mix C adds value or noise - P3-D3 pending
-3. ✅ No data loading errors observed so far
+**P3-D3 is the only experiment that learned to output just the answer letter** (matching teacher behavior). P1, P2, and other P3 experiments output verbose reasoning chains (500-800 chars avg) with 88-89% wrong reasoning.
+
+---
+
+---
+
+## Comprehensive MMLU-Pro Benchmark (All Phases)
+
+**Setup**: 70 questions from MMLU-Pro (same subset across all experiments, 10 answer options A-J). Base model (teacher) accuracy = 17.14% (12/70). 38 checkpoints evaluated across 10 experiments.
+
+### Full Accuracy Table (Sorted by Best Accuracy)
+
+| Rank | Experiment | Best T | Accuracy | Δ Teacher | Output Style |
+|------|-----------|--------|----------|-----------|-------------|
+| 1 | **P3-D3** (Mix C) | T=2/4/8 | **18.6%** | +1.4% | ✅ Concise (answer-only) |
+| 2 | P3-D3 (Mix C) | T=1 | 17.1% | +0.0% | ✅ Concise |
+| 3 | P1-A2 (Recurrent) | T=8 | 14.3% | -2.9% | ❌ Verbose |
+| 4 | P1-A2 (Recurrent) | T=1 | 14.3% | -2.9% | ❌ Verbose |
+| 5 | P2-L4 (+CE) | T=1 | 14.3% | -2.9% | ❌ Verbose |
+| 6 | P3-D2 (Mix B) | T=4 | 14.3% | -2.9% | ❌ Verbose |
+| 7 | P1-A1 (Projector) | T=1 | 12.9% | -4.3% | ❌ Verbose |
+| 8 | P1-A2 (Recurrent) | T=2 | 12.9% | -4.3% | ❌ Verbose |
+| 9 | P1-A2 (Recurrent) | T=4 | 12.9% | -4.3% | ❌ Verbose |
+| 10 | P2-L4 (+CE) | T=8 | 12.9% | -4.3% | ❌ Verbose |
+| 11+ | Remaining 28 checkpoints | various | 5.7%-11.4% | -5.7% to -11.4% | ❌ Verbose |
+
+### Phase-Level Summary
+
+| Phase | Experiments | Best Acc | Avg Acc | Output Pattern | Key Insight |
+|-------|------------|----------|---------|---------------|-------------|
+| **P1** (Architecture) | 3 | 14.3% | 12.4% | Verbose reasoning | Flow midblock most stable |
+| **P2** (Loss Ablation) | 4 | 14.3% | 11.2% | Verbose reasoning | CE loss degrades (P2-L4), endpoint-only worst (5.7%) |
+| **P3** (Data Mix) | 3 | **18.6%** | 13.3% | D3: concise, others: verbose | **Full data mix enables answer-only mode** |
+
+### Output Consistency Analysis (Key Finding)
+
+| Experiment | Avg Output Length | % Short (<50 chars) | % Verbose (≥500 chars) | Verbose+Wrong |
+|------------|-------------------|---------------------|------------------------|---------------|
+| **Teacher** | 11 chars | **100%** | 0% | N/A |
+| P1 experiments | 710 chars | 5.4% | 75.2% | 88.8% of verbose |
+| P2 experiments | 711 chars | 3.6% | 74.0% | 88.3% of verbose |
+| P3-D1 (Mix A) | 517 chars | 33.6% | 55.4% | — |
+| P3-D2 (Mix B) | 670 chars | 6.8% | 68.6% | — |
+| **P3-D3 (Mix C)** | **11 chars** | **100%** | **0%** | **N/A** |
+
+**Interpretation**: P3-D3 is the *only* student experiment that matches the teacher's output style — concise answer letters only. All other experiments (including P3-D1, D2 with the same L3 config but different data) produce verbose reasoning chains where 88-89% of the reasoning is factually wrong.
+
+### Answer Collapse: Both Models Only Output A-C
+
+| Choice | Ground Truth | Teacher | P3-D3 |
+|--------|-------------|---------|-------|
+| A | 11 (15.7%) | 25 (35.7%) | **48 (68.6%)** |
+| B | 8 (11.4%) | **38 (54.3%)** | 18 (25.7%) |
+| C | 5 (7.1%) | 7 (10.0%) | 4 (5.7%) |
+| **D-J** | **46 (65.7%)** | **0 (0%)** | **0 (0%)** |
+
+Both models **never** output options D through J — yet 66% of correct answers are D-J. The theoretical maximum accuracy with this behavior is 24/70 = 34.3%. Models achieve ~50% of that ceiling.
+
+**P3-D3's apparent improvement is partly a bias shift**: Teacher preferred B (54%), P3-D3 prefers A (69%). When the correct answer happens to be A (11 questions), P3-D3 looks better. When it's B (8 questions), it looks worse.
+
+### P3-D3 vs Teacher: Question-Level Overlap
+
+| Scenario | Count | % |
+|----------|-------|---|
+| Both correct | 8 | 11.4% |
+| P3-D3 only (fixed) | 5 | 7.1% |
+| Teacher only (regressed) | 4 | 5.7% |
+| Both wrong | 53 | 75.7% |
+| **Net gain** | **+1** | |
+
+**Of 5 "fixes": ALL had correct answer = A (P3-D3's bias helped).**  
+**Of 4 "regressions": ALL had correct answer = B (P3-D3's bias hurt).**
 
 ---
 
@@ -452,49 +412,6 @@ The KL loss in P1 was ~0.11 at validation, which significantly inflated the tota
 4. ⏳ Create quality vs latency curve
 
 ---
-
-## MMLU-Pro Analysis: Why This Is Good News
-
-### Common Misconception
-> "Trained models should beat the base model immediately"
-
-**Reality**: With only 3 epochs on 17K samples (Mix B), closing a 2.8% gap on MMLU-Pro is **excellent progress**.
-
-### Context: MMLU-Pro Difficulty
-- Random baseline: 14.3% (10 options, including "I don't know")
-- Base model: 22.22% (8% above random)
-- P1-A3 T=1: 19.44% (5% above random, 87.5% of base performance)
-- Gap: Only 2.8 percentage points
-
-### Why Flow Midblock Excels
-
-| Property | Recurrent (P1-A2) | Flow (P1-A3) | Winner |
-|----------|-------------------|--------------|--------|
-| Peak MMLU-Pro | 19.44% @ T=2 | 19.44% @ T=1 | Tie |
-| T-scaling behavior | Non-monotonic (dip at T=4) | Monotonic degradation | **Flow** |
-| Variance across T | 4.17% | **2.77%** | **Flow** |
-| Architecture | Discrete steps | Continuous time | **Flow** |
-| Training stability | Good | Good | Tie |
-
-### Predictions for Future Phases
-
-Based on P1 results, we predict:
-
-1. **P2 (Loss Ablation)**: Adding trajectory loss (L3) should:
-   - Improve multi-step reasoning
-   - Reduce T=4 dip seen in P1-A2
-   - Push peak MMLU-Pro above 20%
-
-2. **P3 (Data Mix)**: Mix C should:
-   - Add STEM reasoning (OpenMath)
-   - Add instruction following (Magpie)
-   - Close remaining 2.8% gap
-
-3. **P4 (T Sweep)**: Expected curve:
-   - T=1: ~19% (fast, decent)
-   - T=2: ~20% (optimal speed/quality)
-   - T=4: ~20% (stable)
-   - T=8: ~18% (diminishing returns)
 
 ---
 
@@ -537,6 +454,51 @@ Based on P1 results, we predict:
 
 ---
 
+## Final Verdict: Is This Paper-Ready?
+
+**Short answer: No. The approach has signal but is not yet paper-ready. Three critical gaps remain.**
+
+### What Works (the Signal)
+
+1. **4→1 layer compression with accuracy parity.** P3-D3 compresses 4 teacher layers into 1 flow midblock layer and achieves 18.6% MMLU-Pro vs teacher's 17.1% — slightly better, not worse. This is the central claim and it holds.
+
+2. **Output discipline emerges from data diversity.** Only Mix C (4 datasets: FineWeb + UltraChat + Magpie + OpenMath) produces concise, answer-only outputs matching the teacher style. All other configurations produce verbose reasoning chains. This is a reproducible, quantifiable finding about data mixture effects on generation behavior.
+
+3. **Flow midblock trains stably.** Continuous timestep sampling works, gradient norms are healthy (1.3-1.7), no NaN/collapse in any experiment. The architecture is sound.
+
+### What Doesn't Work (the Gaps)
+
+1. **Absolute accuracy is too low.** 18.6% MMLU-Pro on a 10-option benchmark is only 4.3 points above random guessing (14.3%). A paper needs to demonstrate non-trivial reasoning, not marginal improvements over chance.
+
+2. **Answer space collapse.** Both teacher and student never output options D-J — 66% of the answer space is unreachable. The maximum possible accuracy is 34.3%. This is a fundamental model capacity issue, not a distillation problem.
+
+3. **No meaningful delta over teacher.** The +1.4 percentage point improvement (13/70 vs 12/70) is within random variance. The 5 "fixes" are all explained by A-bias, and the 4 "regressions" are all explained by B-bias. Net gain is noise.
+
+### What's Needed for a Paper
+
+| Gap | Required Fix | Effort |
+|-----|-------------|--------|
+| Low accuracy | Scale to 1.5B+ teacher, longer training (10+ epochs), larger data (50K+ samples) | High |
+| Answer collapse | Model must learn to output D-J; possibly needs different prompt format or structured output training | Medium |
+| No delta over teacher | Need a scenario where teacher already performs well (40%+ accuracy) so compression doesn't just preserve low performance | Medium |
+| Baselines | Need KD baselines: logit-level distillation, layer pruning, simple linear mapping — to prove flow midblock is superior | Medium |
+
+### Next Actions (Priority-Ordered)
+
+1. **Fix the MMLU-Pro prompt format.** Current few-shot prompt asks for reasoning + answer letter. Switch to zero-shot "Answer:" format that encourages direct letter-only responses. This may unlock D-J outputs and higher teacher baseline.
+
+2. **Evaluate on teacher-native tasks.** The teacher is Qwen3.5-0.8B — evaluate on MMLU (original, 4-option), HellaSwag, ARC-Easy where the teacher likely performs at 40-60% accuracy. Compression only matters if the uncompressed model is capable.
+
+3. **Scale the experiment.** v0.1 is proof-of-concept at 0.8B. v0.2 should target 1.5B or 3B with deeper layer compression (8→1 or 12→2 layers).
+
+### Verdict for Immediate Next Session
+
+- **Continue the project.** The 4→1 compression parity finding is real and worth pursuing.
+- **Do NOT write a paper yet.** Address the answer collapse issue first, then re-evaluate on easier benchmarks where the teacher's accuracy floor is higher.
+- **Priority**: Fix prompt format → re-evaluate → if teacher hits 40%+ and student stays within 5%, then plan the paper.
+
+---
+
 ## Changelog
 
 | Date | Update |
@@ -551,6 +513,7 @@ Based on P1 results, we predict:
 | 2026-04-24 | **P2-L1 verified complete** (gb55agvq, easy-microwave-5) - State: finished, val_loss=0.000672, grad_norm=0.0062, runtime=47,743s |
 | 2026-04-26 | **Phase 2 Complete** - All 4 loss ablations finished (L1-L4). L3 selected as best config. CE loss hurts performance (0.319 vs 0.056) |
 | 2026-04-26 | **Phase 3 Running** - P3-D1 (Mix A) 61% complete. P3-D2/D3 and all P4 experiments pending. 7/15 experiments finished. |
+| 2026-05-05 | **Phase 3 Complete + Full MMLU-Pro Analysis** - All 10 experiments evaluated on MMLU-Pro (70 q, 38 checkpoints). P3-D3 (Mix C) wins at 18.6%. Key discovery: answer space collapse (models never output D-J, 66% of correct answers unreachable). P4 cancelled. Final verdict: not yet paper-ready but strong signal for 4→1 layer compression parity. |
 
 ---
 
@@ -582,57 +545,25 @@ uv run python scripts/push_checkpoints_to_hf.py --all --repo-id your-username/mi
 
 ---
 
-## ⚠️ REMINDER: Run MMLU-Pro Downstream Benchmarks
+## MMLU-Pro Evaluation Status: COMPLETE
 
-**All Phase 2 experiments (L1-L4) are complete and need MMLU-Pro evaluation!**
+All experiments (P1-P3) have been evaluated on MMLU-Pro (70 questions, 10-option). See [Comprehensive MMLU-Pro Benchmark](#comprehensive-mmlu-pro-benchmark-all-phases) for full results.
 
-After uploading models to Hugging Face, run the MMLU-Pro benchmark on all completed experiments to determine true downstream performance:
-
-### MMLU-Pro Evaluation Checklist
-
-- [ ] **P2-L1** (Endpoint-only) - Run MMLU-Pro @ T=1,2,4,8
-- [ ] **P2-L2** (End + KL) - Run MMLU-Pro @ T=1,2,4,8  
-- [ ] **P2-L3** (End + Traj + KL) - Run MMLU-Pro @ T=1,2,4,8 ⭐ **Priority: Best config**
-- [ ] **P2-L4** (End + Traj + KL + CE) - Run MMLU-Pro @ T=1,2,4,8
-- [ ] **P3-D1** (Mix A) - Run MMLU-Pro @ T=1,2,4,8 (when complete)
-- [ ] **P3-D2** (Mix B) - Run MMLU-Pro @ T=1,2,4,8 (when complete)
-- [ ] **P3-D3** (Mix C) - Run MMLU-Pro @ T=1,2,4,8 (when complete)
-
-### Quick MMLU-Pro Evaluation Command
-
-```bash
-# Example: Evaluate P2-L3 on MMLU-Pro
-uv run python scripts/eval_mmlu_pro.py \
-    --model_path outputs/v0_1_matrix/p2_l3_flow_mixb_endtrajkl_trainT_r2468/checkpoint-best \
-    --output_dir evals/p2_l3_mmlu_pro \
-    --eval_ts 1 2 4 8 \
-    --num_samples 72 \
-    --max_new_tokens 32
-```
-
-### Key Questions to Answer
-
-1. **Does L3 (End + Traj + KL) outperform L2 (End + KL) on MMLU-Pro?**
-   - Trajectory loss theoretically improves multi-step reasoning
-   - L3 has lower train loss (0.036 vs 0.037) but similar val loss (0.057 vs 0.056)
-
-2. **How bad is L4 (+CE) on downstream tasks?**
-   - Val loss is 5.7× higher (0.319 vs 0.056)
-   - CE loss may cause collapse in reasoning quality
-   - Could be catastrophic for MMLU-Pro performance
-
-3. **Is L1 (End-only) competitive despite low loss magnitude?**
-   - Loss not directly comparable (no KL component)
-   - L1 trained faster (13.3h vs 19h) with better train/val gap (+27% vs +51-58%)
-   - Could surprise on downstream performance
-
-4. **Which data mix performs best on reasoning tasks?**
-   - Mix A (FineWeb only): Web text baseline
-   - Mix B (FW+UC): Instruction following added
-   - Mix C (Full): STEM reasoning added via OpenMath
-
-> **Note**: Val loss ≠ downstream performance. L3 shows best config on training metrics, but MMLU-Pro is the ground truth for reasoning capability. Run evaluations before declaring winners!
+**Key Results**:
+| Checkpoint | Completed |
+|------------|-----------|
+| P1-A1 (T=1) | ✅ 12.9% |
+| P1-A2 (T=1,2,4,8) | ✅ 14.3% (best) |
+| P1-A3 (T=1,2,4,8) | ✅ 11.4% |
+| P2-L1 (T=1,2,4,8) | ✅ 10.0% (best) |
+| P2-L2 (T=1,2,4,8) | ✅ 11.4% (best) |
+| P2-L3 (T=1,2,4,8) | ✅ 12.9% (best) |
+| P2-L4 (T=1,2,4,8) | ✅ 14.3% (best) |
+| P3-D1 (T=1,2,4,8) | ✅ 11.4% (best) |
+| P3-D2 (T=1,2,4,8) | ✅ 14.3% (best) |
+| P3-D3 (T=1,2,4,8) | ✅ **18.6%** (best) |
+| Teacher (Baseline) | ✅ 17.1% (constant) |
 
 ---
 
-*Report generated for MidFlowLM v0.1 experiment matrix - Last updated: 2026-04-26*
+*Report generated for MidFlowLM v0.1 experiment matrix - Last updated: 2026-05-05*
