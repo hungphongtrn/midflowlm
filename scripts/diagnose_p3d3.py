@@ -1,94 +1,41 @@
 #!/usr/bin/env python
-"""P3-D3 diagnostic probe — Phase 1 skeleton.
+"""P3-D3 diagnostic probe and report generation.
 
 This script performs diagnostic analysis on the P3-D3 checkpoint to investigate
-flat T-scaling behavior. It selects probe examples from stress test results and
-prepares for trace-based analysis.
+flat T-scaling behavior. It supports two modes:
+
+1. Capture mode (default): Select probes, run model, save traces to JSON/CSV
+2. Report mode (--report): Generate markdown diagnostic report from saved traces
 
 Usage:
-    python scripts/diagnose_p3d3.py \
-        --checkpoint ./models/p3_d3_mix_c/checkpoint.pth \
-        --config configs/v0_1_matrix/midflow_qwen_8to11_p3_d3_flow_mixc_endtrajkl_trainT_r2468.yaml \
-        --mmlu-path results/stress_test/mmlu_pro_results.json \
-        --arc-path results/stress_test/arc_easy_results.json \
-        --output-dir results/diagnostic_p3d3
+    # Full pipeline: capture + report
+    python scripts/diagnose_p3d3.py --checkpoint ... --config ... --mmlu-path ... --arc-path ... --report
+
+    # Report only from saved traces (fast, no model)
+    python scripts/diagnose_p3d3.py --report --traces-dir results/diagnostic_p3d3/traces
+
+    # Capture only (existing behavior)
+    python scripts/diagnose_p3d3.py --checkpoint ... --config ... --mmlu-path ... --arc-path ...
 """
 import argparse
 import json
 import sys
-import torch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.diagnostic.probe import ProbeSet, select_probes
-from src.diagnostic.runner import DeterministicTraceRunner, load_model_from_checkpoint
 
+def _do_capture(args):
+    import torch
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="P3-D3 diagnostic probe for investigating flat T-scaling"
-    )
-    
-    parser.add_argument(
-        "--checkpoint",
-        type=str,
-        required=True,
-        help="Path to the P3-D3 checkpoint file (e.g., ./models/p3_d3_mix_c/checkpoint.pth)"
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help="Path to the model config YAML file"
-    )
-    parser.add_argument(
-        "--mmlu-path",
-        type=str,
-        required=True,
-        help="Path to MMLU-Pro stress test results JSON"
-    )
-    parser.add_argument(
-        "--arc-path",
-        type=str,
-        required=True,
-        help="Path to ARC-Easy stress test results JSON"
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="results/diagnostic_p3d3",
-        help="Directory for output files (default: results/diagnostic_p3d3)"
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed for deterministic behavior (default: 42)"
-    )
-    parser.add_argument(
-        "--T",
-        type=int,
-        nargs="+",
-        default=[1, 2, 8, 64],
-        help="List of T values to test (default: 1 2 8 64)"
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cuda",
-        choices=["cuda", "cpu"],
-        help="Device to run on (default: cuda)"
-    )
+    from src.diagnostic.probe import ProbeSet, select_probes
+    from src.diagnostic.runner import DeterministicTraceRunner, load_model_from_checkpoint
 
-    args = parser.parse_args()
-
-    # Validate input paths exist
     checkpoint_path = Path(args.checkpoint)
     config_path = Path(args.config)
     mmlu_path = Path(args.mmlu_path)
     arc_path = Path(args.arc_path)
-    
+
     for path, name in [
         (checkpoint_path, "checkpoint"),
         (config_path, "config"),
@@ -99,79 +46,44 @@ def main():
             print(f"Error: {name} not found: {path}", file=sys.stderr)
             sys.exit(1)
 
-    # Create output directory
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Output directory: {output_dir}")
 
-    # Select probes from stress test results
-    print(f"\nSelecting probes from stress test results...")
-    print(f"  MMLU-Pro: {mmlu_path}")
-    print(f"  ARC-Easy: {arc_path}")
-    
     probes = select_probes(
         mmlu_pro_path=str(mmlu_path),
         arc_easy_path=str(arc_path),
     )
-    
-    # Create probe set with metadata
     probe_set = ProbeSet(
         probes=probes,
         checkpoint_source=str(checkpoint_path),
         seed=args.seed,
     )
 
-    # Write probes to JSON
     probes_file = output_dir / "probes.json"
     with open(probes_file, "w") as f:
         json.dump(probe_set.to_dict(), f, indent=2)
-    
-    print(f"\nSelected {len(probes)} probes -> {probes_file}")
-    
-    # Print breakdown by benchmark
+    print(f"Selected {len(probes)} probes -> {probes_file}")
+
     mmlu_count = sum(1 for p in probes if p.benchmark == "mmlu_pro")
     arc_count = sum(1 for p in probes if p.benchmark == "arc_easy")
     print(f"  - MMLU-Pro: {mmlu_count}")
     print(f"  - ARC-Easy: {arc_count}")
 
-    # Print summary
-    print(f"\n{'='*60}")
-    print("Phase 1 Skeleton Complete - Starting Trace Collection")
-    print(f"{'='*60}")
-    print(f"Checkpoint: {checkpoint_path}")
-    print(f"Config: {config_path}")
-    print(f"Seed: {args.seed}")
-    print(f"T values: {args.T}")
-
-    # Load model and run traces
-    print(f"\n{'='*60}")
-    print("Loading model from checkpoint...")
-    print(f"{'='*60}")
-    
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
-    
+
     try:
         model, tokenizer = load_model_from_checkpoint(
             checkpoint_path=str(checkpoint_path),
             config_path=str(config_path),
             device=device,
         )
-        print(f"Model loaded successfully!")
-        print(f"Model family: {model.family}")
-        print(f"Model layers: {model.start_layer}-{model.end_layer}")
     except Exception as e:
         print(f"Error loading model: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         sys.exit(1)
-    
-    # Create trace runner and run full capture
-    print(f"\n{'='*60}")
-    print("Running diagnostic traces...")
-    print(f"{'='*60}")
 
-    # Ensure all probes have input_ids
     for probe in probes:
         if probe.input_ids is None or len(probe.input_ids) == 0:
             if probe.prompt_text:
@@ -238,14 +150,90 @@ def main():
                     ])
     print(f"Summary written to {summary_path}")
 
-    # Final summary
-    print(f"\n{'='*60}")
-    print("Diagnostic Trace Collection Complete")
-    print(f"{'='*60}")
-    print(f"Output directory: {output_dir}")
-    print(f"Probe set: {probes_file}")
-    print(f"Traces: {out_root}")
-    print(f"Summary: {summary_path}")
+
+def _do_report(args):
+    from src.diagnostic.analysis import run_analysis
+    from src.diagnostic.report import generate_report
+
+    traces_dir = args.traces_dir or str(Path(args.output_dir) / "traces")
+    probes_path = args.probes or str(Path(traces_dir).parent / "probes.json")
+
+    if not Path(traces_dir).exists():
+        print(f"ERROR: Traces directory not found: {traces_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Running analysis on traces from: {traces_dir}")
+    flow_result, decoder_result = run_analysis(traces_dir, args.T)
+    report_text = generate_report(flow_result, decoder_result, probes_path, traces_dir)
+
+    report_path = Path(args.output_dir) / "report.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(report_path, "w") as f:
+        f.write(report_text)
+    print(f"Report written to {report_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="P3-D3 diagnostic probe and report generation"
+    )
+
+    parser.add_argument(
+        "--checkpoint", type=str,
+        help="Path to the P3-D3 checkpoint file"
+    )
+    parser.add_argument(
+        "--config", type=str,
+        help="Path to the model config YAML file"
+    )
+    parser.add_argument(
+        "--mmlu-path", type=str,
+        help="Path to MMLU-Pro stress test results JSON"
+    )
+    parser.add_argument(
+        "--arc-path", type=str,
+        help="Path to ARC-Easy stress test results JSON"
+    )
+    parser.add_argument(
+        "--output-dir", type=str, default="results/diagnostic_p3d3",
+        help="Directory for output files (default: results/diagnostic_p3d3)"
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42,
+        help="Random seed for deterministic behavior (default: 42)"
+    )
+    parser.add_argument(
+        "--T", type=int, nargs="+", default=[1, 2, 8, 64],
+        help="List of T values to test (default: 1 2 8 64)"
+    )
+    parser.add_argument(
+        "--device", type=str, default="cuda", choices=["cuda", "cpu"],
+        help="Device to run on (default: cuda)"
+    )
+    parser.add_argument(
+        "--report", action="store_true",
+        help="Generate report from saved traces (skips model loading)"
+    )
+    parser.add_argument(
+        "--traces-dir", type=str,
+        help="Path to traces directory [default: results/diagnostic_p3d3/traces]"
+    )
+    parser.add_argument(
+        "--probes", type=str,
+        help="Path to probes.json [default: <traces-dir>/../probes.json]"
+    )
+
+    args = parser.parse_args()
+
+    if args.report and not args.checkpoint:
+        _do_report(args)
+    elif args.report and args.checkpoint:
+        _do_capture(args)
+        _do_report(args)
+    elif args.checkpoint:
+        _do_capture(args)
+    else:
+        parser.error("Either --checkpoint (for capture mode) or --report (for report-only mode) is required")
 
 
 if __name__ == "__main__":
