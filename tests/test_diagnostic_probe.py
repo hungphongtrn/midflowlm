@@ -84,3 +84,13 @@ class TestProbeSelection:
         
         reloaded = ProbeSet.from_dict(data)
         assert len(reloaded.probes) == len(probes)
+        for original, recovered in zip(probes, reloaded.probes):
+            assert recovered.id == original.id
+            assert recovered.benchmark == original.benchmark
+            assert recovered.question == original.question
+            assert recovered.choices == original.choices
+            assert recovered.target_label == original.target_label
+            assert recovered.student_correct == original.student_correct
+            assert recovered.teacher_correct == original.teacher_correct
+            assert recovered.student_answer_T1 == original.student_answer_T1
+            assert recovered.teacher_answer == original.teacher_answer

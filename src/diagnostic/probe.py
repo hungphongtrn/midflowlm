@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
 import json
 
@@ -79,8 +79,13 @@ def select_probes(
 ) -> List[ProbeExample]:
     probes = []
 
-    with open(mmlu_pro_path) as f:
-        mmlu_data = json.load(f)
+    try:
+        with open(mmlu_pro_path) as f:
+            mmlu_data = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"MMLU-Pro results file not found: {mmlu_pro_path}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in MMLU-Pro results: {e}")
     mmlu_candidates = [
         item for item in mmlu_data
         if item.get("answer", "") in "EFGHIJ"
@@ -99,8 +104,13 @@ def select_probes(
             teacher_answer=item.get("teacher_answer", ""),
         ))
 
-    with open(arc_easy_path) as f:
-        arc_data = json.load(f)
+    try:
+        with open(arc_easy_path) as f:
+            arc_data = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"ARC-Easy results file not found: {arc_easy_path}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in ARC-Easy results: {e}")
     arc_candidates = [
         item for item in arc_data
         if item.get("teacher_correct") is True
