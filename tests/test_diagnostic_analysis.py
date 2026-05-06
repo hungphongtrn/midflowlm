@@ -113,3 +113,123 @@ class TestAnalyzeFlow:
         pair_test = [t for t in result.pairwise_tests if t["T_a"] == 1 and t["T_b"] == 8][0]
         assert pair_test["significant"] is True
         assert abs(pair_test["cohens_d"]) > 0.5
+
+
+class TestAnalyzeDecoder:
+    def test_analyze_decoder_accuracy(self, tmp_path):
+        traces_dir = Path(tmp_path) / "traces"
+        probes = [f"probe_{i:03d}" for i in range(4)]
+        for T in [1, 8]:
+            T_dir = traces_dir / f"T{T}"
+            T_dir.mkdir(parents=True, exist_ok=True)
+            flow = {pid: {"probe_id": pid, "benchmark": "mmlu_pro", "T": T, "endpoint_hidden_norm": 0.1, "per_step_velocity_norms": [0.1] * T, "trajectory_endpoint_norm": 0.1, "trajectory_divergence_from_T1": 0.0, "teacher_anchor_distances": {}} for pid in probes}
+            decoder = {}
+            for i, pid in enumerate(probes):
+                decoder[pid] = {
+                    "probe_id": pid, "benchmark": "mmlu_pro", "T": T,
+                    "logits_answer_tokens": {l: -1.0 for l in "ABCDEFGHIJ"},
+                    "predicted_answer": "C", "predicted_token_id": 17627,
+                    "ground_truth_label": "C" if i < 2 else "E",
+                    "parsed_answer_match": i < 2,
+                    "teacher_logits_answer_tokens": {l: -2.0 for l in "ABCDEFGHIJ"},
+                    "kl_divergence": 0.5, "js_divergence": 0.3,
+                }
+            with open(T_dir / "flow_traces.json", "w") as f:
+                json.dump(flow, f)
+            with open(T_dir / "decoder_traces.json", "w") as f:
+                json.dump(decoder, f)
+        from src.diagnostic.analysis import analyze_decoder
+        result = analyze_decoder(str(traces_dir), [1, 8])
+        assert result.per_T_stats[1]["accuracy"] == 0.5
+        assert result.per_T_stats[8]["accuracy"] == 0.5
+
+    def test_analyze_decoder_coverage(self, tmp_path):
+        traces_dir = Path(tmp_path) / "traces"
+        probes = [f"probe_{i:03d}" for i in range(3)]
+        for T in [1, 8]:
+            T_dir = traces_dir / f"T{T}"
+            T_dir.mkdir(parents=True, exist_ok=True)
+            flow = {pid: {"probe_id": pid, "benchmark": "mmlu_pro", "T": T, "endpoint_hidden_norm": 0.1, "per_step_velocity_norms": [0.1] * T, "trajectory_endpoint_norm": 0.1, "trajectory_divergence_from_T1": 0.0, "teacher_anchor_distances": {}} for pid in probes}
+            decoder = {}
+            for i, pid in enumerate(probes):
+                probs = {"A": 0.1, "B": 0.55, "C": 0.2, "D": 0.1, "E": 0.05, "F": 0.0, "G": 0.0, "H": 0.0, "I": 0.0, "J": 0.0}
+                decoder[pid] = {
+                    "probe_id": pid, "benchmark": "mmlu_pro", "T": T,
+                    "logits_answer_tokens": {l: np.log(p) for l, p in probs.items()},
+                    "predicted_answer": "B", "predicted_token_id": 17626,
+                    "ground_truth_label": "B",
+                    "parsed_answer_match": True,
+                    "teacher_logits_answer_tokens": {},
+                    "kl_divergence": 0.0, "js_divergence": 0.0,
+                }
+            with open(T_dir / "flow_traces.json", "w") as f:
+                json.dump(flow, f)
+            with open(T_dir / "decoder_traces.json", "w") as f:
+                json.dump(decoder, f)
+        from src.diagnostic.analysis import analyze_decoder
+        result = analyze_decoder(str(traces_dir), [1, 8])
+        assert result.answer_coverage[1]["probes_gt_50pct"] == 3
+
+    def test_analyze_decoder_stability(self, tmp_path):
+        traces_dir = Path(tmp_path) / "traces"
+        probes = [f"probe_{i:03d}" for i in range(4)]
+        for T_idx, T in enumerate([1, 8, 64]):
+            T_dir = traces_dir / f"T{T}"
+            T_dir.mkdir(parents=True, exist_ok=True)
+            flow = {pid: {"probe_id": pid, "benchmark": "mmlu_pro", "T": T, "endpoint_hidden_norm": 0.1, "per_step_velocity_norms": [0.1] * T, "trajectory_endpoint_norm": 0.1, "trajectory_divergence_from_T1": 0.0, "teacher_anchor_distances": {}} for pid in probes}
+            decoder = {}
+            for i, pid in enumerate(probes):
+                answers = [[["C", False], ["C", False], ["C", False]],
+                           [["C", False], ["D", False], ["E", False]],
+                           [["C", False], ["C", False], ["C", True]],
+                           [["D", True], ["D", True], ["D", True]]]
+                pred, match = answers[i][T_idx]
+                decoder[pid] = {
+                    "probe_id": pid, "benchmark": "mmlu_pro", "T": T,
+                    "logits_answer_tokens": {l: -1.0 for l in "ABCDEFGHIJ"},
+                    "predicted_answer": pred, "predicted_token_id": 17627,
+                    "ground_truth_label": "D",
+                    "parsed_answer_match": match,
+                    "teacher_logits_answer_tokens": {},
+                    "kl_divergence": 0.0, "js_divergence": 0.0,
+                }
+            with open(T_dir / "flow_traces.json", "w") as f:
+                json.dump(flow, f)
+            with open(T_dir / "decoder_traces.json", "w") as f:
+                json.dump(decoder, f)
+        from src.diagnostic.analysis import analyze_decoder
+        result = analyze_decoder(str(traces_dir), [1, 8, 64])
+        assert result.prediction_stability["always_wrong"] == 2
+        assert result.prediction_stability["flipped"] == 1
+        assert result.prediction_stability["became_correct"] == 1
+
+    def test_analyze_decoder_logit_shift(self, tmp_path):
+        traces_dir = Path(tmp_path) / "traces"
+        probes = [f"probe_{i:03d}" for i in range(3)]
+        for T in [1, 8]:
+            T_dir = traces_dir / f"T{T}"
+            T_dir.mkdir(parents=True, exist_ok=True)
+            flow = {pid: {"probe_id": pid, "benchmark": "mmlu_pro", "T": T, "endpoint_hidden_norm": 0.1, "per_step_velocity_norms": [0.1] * T, "trajectory_endpoint_norm": 0.1, "trajectory_divergence_from_T1": 0.0, "teacher_anchor_distances": {}} for pid in probes}
+            decoder = {}
+            for i, pid in enumerate(probes):
+                labels = "ABCDEFGHIJ"
+                t_factor = 1.0 if T == 1 else 5.0
+                decoder[pid] = {
+                    "probe_id": pid, "benchmark": "mmlu_pro", "T": T,
+                    "logits_answer_tokens": {
+                        l: t_factor * (ord(l) - 64) for l in labels
+                    },
+                    "predicted_answer": "C", "predicted_token_id": 17627,
+                    "ground_truth_label": "E",
+                    "parsed_answer_match": False,
+                    "teacher_logits_answer_tokens": {},
+                    "kl_divergence": 0.0, "js_divergence": 0.0,
+                }
+            with open(T_dir / "flow_traces.json", "w") as f:
+                json.dump(flow, f)
+            with open(T_dir / "decoder_traces.json", "w") as f:
+                json.dump(decoder, f)
+        from src.diagnostic.analysis import analyze_decoder
+        result = analyze_decoder(str(traces_dir), [1, 8])
+        shift = [t for t in result.logit_shift_tests if t["T_a"] == 1 and t["T_b"] == 8][0]
+        assert shift["mean_kl_delta"] > 0
