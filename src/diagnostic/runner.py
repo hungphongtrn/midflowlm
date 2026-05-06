@@ -3,11 +3,13 @@ import json
 import random
 import torch
 import numpy as np
+import yaml
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 
 from src.diagnostic.probe import ProbeSet, ProbeExample
+from transformers import AutoTokenizer
 
 
 @dataclass
@@ -158,3 +160,105 @@ class DeterministicTraceRunner:
                 records.append(record)
             results[T] = records
         return results
+
+    def run_full_capture(self, probe_set: ProbeSet, T_values: List[int]) -> Dict[str, Any]:
+        """Run full capture pipeline: flow traces, decoder traces, and teacher data.
+        
+        Args:
+            probe_set: The set of probes to run.
+            T_values: List of T values to test each probe at.
+            
+        Returns:
+            Dictionary with "flow_traces" and "decoder_traces" keys,
+            each mapping probe_id to list of trace dicts.
+        """
+        from src.diagnostic.capture import (
+            capture_flow_traces,
+            capture_decoder_traces,
+            capture_teacher_traces,
+        )
+        flow_results = {}
+        decoder_results = {}
+        for probe in probe_set.probes:
+            teacher_data = capture_teacher_traces(
+                self.model, probe, self.device, self.tokenizer
+            )
+            flow_traces = capture_flow_traces(
+                self.model, probe, T_values, self.device, self.seed
+            )
+            for ft in flow_traces:
+                if teacher_data and teacher_data.get("teacher_anchor_distances"):
+                    ft.teacher_anchor_distances = teacher_data["teacher_anchor_distances"]
+            decoder_traces = capture_decoder_traces(
+                self.model, self.tokenizer, probe,
+                T_values, self.device, self.seed,
+                teacher_data=teacher_data,
+            )
+            flow_results[probe.id] = [ft.to_dict() for ft in flow_traces]
+            decoder_results[probe.id] = [dt.to_dict() for dt in decoder_traces]
+        return {"flow_traces": flow_results, "decoder_traces": decoder_results}
+
+
+def load_model_from_checkpoint(
+    checkpoint_path: str,
+    config_path: str,
+    device: torch.device,
+) -> Tuple[torch.nn.Module, Any]:
+    """Load a FrozenQwenStudent model from checkpoint and config.
+    
+    This function handles both:
+    1. Trainer checkpoint format with model_state_dict
+    2. Raw midblock state dict (loaded via load_midblock)
+    
+    Args:
+        checkpoint_path: Path to the checkpoint file (.pth)
+        config_path: Path to the YAML config file
+        device: torch device to load the model on
+        
+    Returns:
+        Tuple of (model, tokenizer) where:
+        - model: FrozenQwenStudent instance in eval mode on device
+        - tokenizer: AutoTokenizer instance for the model
+    """
+    from src.model.student_qwen import FrozenQwenStudent
+    
+    # Load config
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    
+    model_config = config.get("model", {})
+    replacement_config = config.get("replacement_model", {})
+    
+    # Create model
+    model = FrozenQwenStudent(
+        model_name=model_config.get("name", "Qwen/Qwen3.5-0.8B"),
+        start_layer=replacement_config.get("start_layer", 8),
+        end_layer=replacement_config.get("end_layer", 11),
+        max_steps_T=replacement_config.get("max_steps_T", 8),
+        device=str(device),
+        dtype=torch.float32,
+        bypass_mode=False,
+        family=model_config.get("family", "flow_midblock"),
+    )
+    
+    # Load checkpoint (handles both formats)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        # Trainer checkpoint format
+        model.load_state_dict(checkpoint["model_state_dict"])
+    else:
+        # Raw midblock state dict
+        model.load_midblock(checkpoint_path)
+    
+    # Set to eval mode and move to device
+    model.eval()
+    model.to(device)
+    
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_config.get("name", "Qwen/Qwen3.5-0.8B"),
+        trust_remote_code=True
+    )
+    
+    return model, tokenizer

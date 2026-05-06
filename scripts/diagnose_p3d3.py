@@ -166,69 +166,86 @@ def main():
         traceback.print_exc()
         sys.exit(1)
     
-    # Create trace runner
+    # Create trace runner and run full capture
     print(f"\n{'='*60}")
     print("Running diagnostic traces...")
     print(f"{'='*60}")
-    
-    runner = DeterministicTraceRunner(
-        model=model,
-        tokenizer=tokenizer,
-        device=device,
-        seed=args.seed,
-    )
-    
-    # Run probes at each T value
-    for T in args.T:
-        print(f"\nRunning {len(probes)} probes at T={T}...")
-        
-        # Prepare probe set for this T value
-        records = []
-        for probe in probes:
-            # Check if probe has input_ids, if not, tokenize the prompt
-            if probe.input_ids is None or len(probe.input_ids) == 0:
-                if probe.prompt_text:
-                    probe.input_ids = tokenizer.encode(probe.prompt_text, return_tensors=None)
-                else:
-                    # Create a simple prompt from question and choices
-                    prompt = f"Question: {probe.question}\nChoices:\n"
-                    for i, choice in enumerate(probe.choices):
-                        prompt += f"{chr(65+i)}. {choice}\n"
-                    prompt += "Answer:"
-                    probe.input_ids = tokenizer.encode(prompt, return_tensors=None)
-            
-            # Run the probe
-            try:
-                record = runner.run_single(probe, T=T)
-                records.append(record)
-                print(f"  {probe.id}: norm={record.endpoint_hidden_norm:.4f}, pred={record.predicted_answer}")
-            except Exception as e:
-                print(f"  {probe.id}: ERROR - {e}", file=sys.stderr)
-        
-        # Save traces for this T
-        traces_file = output_dir / f"traces_T{T}.json"
-        traces_data = {
-            "T": T,
-            "seed": args.seed,
-            "checkpoint": str(checkpoint_path),
-            "num_probes": len(records),
-            "traces": [record.to_dict() for record in records],
-        }
-        
-        with open(traces_file, "w") as f:
-            json.dump(traces_data, f, indent=2)
-        
-        print(f"Saved {len(records)} traces to {traces_file}")
-    
+
+    # Ensure all probes have input_ids
+    for probe in probes:
+        if probe.input_ids is None or len(probe.input_ids) == 0:
+            if probe.prompt_text:
+                probe.input_ids = tokenizer.encode(probe.prompt_text, return_tensors=None)
+            else:
+                prompt = f"Question: {probe.question}\nChoices:\n"
+                for i, choice in enumerate(probe.choices):
+                    prompt += f"{chr(65+i)}. {choice}\n"
+                prompt += "Answer:"
+                probe.input_ids = tokenizer.encode(prompt, return_tensors=None)
+
+    runner = DeterministicTraceRunner(model, tokenizer, device, seed=args.seed)
+    results = runner.run_full_capture(probe_set, args.T)
+
+    import csv
+    import numpy as np
+
+    out_root = Path(args.output_dir) / "traces"
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    for T_val in args.T:
+        T_dir = out_root / f"T{T_val}"
+        T_dir.mkdir(exist_ok=True)
+
+        flow_T = {}
+        decoder_T = {}
+        for pid, traces in results["flow_traces"].items():
+            for t in traces:
+                if t["T"] == T_val:
+                    flow_T[pid] = t
+        for pid, traces in results["decoder_traces"].items():
+            for t in traces:
+                if t["T"] == T_val:
+                    decoder_T[pid] = t
+        with open(T_dir / "flow_traces.json", "w") as f:
+            json.dump(flow_T, f, indent=2)
+        with open(T_dir / "decoder_traces.json", "w") as f:
+            json.dump(decoder_T, f, indent=2)
+        print(f"  T={T_val}: {len(flow_T)} flow traces, {len(decoder_T)} decoder traces")
+
+    summary_path = Path(args.output_dir) / "summary.csv"
+    with open(summary_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["T", "probe_id", "benchmark", "endpoint_hidden_norm",
+                          "trajectory_divergence_from_T1",
+                          "predicted_answer", "parsed_answer_match",
+                          "kl_divergence", "js_divergence",
+                          "mean_velocity_norm"])
+        for T_val in args.T:
+            for pid in sorted(results["flow_traces"].keys()):
+                ft = next((t for t in results["flow_traces"][pid] if t["T"] == T_val), None)
+                dt = next((t for t in results["decoder_traces"][pid] if t["T"] == T_val), None)
+                if ft and dt:
+                    mean_vel = float(np.mean(ft["per_step_velocity_norms"])) if ft.get("per_step_velocity_norms") else 0.0
+                    writer.writerow([
+                        T_val, pid, dt["benchmark"],
+                        ft["endpoint_hidden_norm"],
+                        ft.get("trajectory_divergence_from_T1", 0),
+                        dt["predicted_answer"],
+                        dt["parsed_answer_match"],
+                        dt.get("kl_divergence", 0),
+                        dt.get("js_divergence", 0),
+                        mean_vel,
+                    ])
+    print(f"Summary written to {summary_path}")
+
     # Final summary
     print(f"\n{'='*60}")
     print("Diagnostic Trace Collection Complete")
     print(f"{'='*60}")
     print(f"Output directory: {output_dir}")
     print(f"Probe set: {probes_file}")
-    for T in args.T:
-        traces_file = output_dir / f"traces_T{T}.json"
-        print(f"  T={T}: {traces_file}")
+    print(f"Traces: {out_root}")
+    print(f"Summary: {summary_path}")
 
 
 if __name__ == "__main__":
