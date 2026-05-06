@@ -53,7 +53,7 @@ class TestProbeSelection:
         mmlu_probes = [p for p in probes if p.benchmark == "mmlu_pro"]
         assert len(mmlu_probes) == 1
         assert mmlu_probes[0].target_label in "EFGHIJ"
-        assert not mmlu_probes[0].teacher_correct or not mmlu_probes[0].student_correct
+        assert not mmlu_probes[0].student_correct
 
     def test_select_arc_probes_teacher_correct_student_wrong(self, sample_stress_test_data):
         mmlu_path, arc_path = sample_stress_test_data
