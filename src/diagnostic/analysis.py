@@ -296,3 +296,9 @@ def analyze_decoder(traces_dir, T_values):
         answer_coverage=answer_coverage,
         prediction_stability=prediction_stability,
     )
+
+
+def run_analysis(traces_dir, T_values):
+    flow_result = analyze_flow(traces_dir, T_values)
+    decoder_result = analyze_decoder(traces_dir, T_values)
+    return flow_result, decoder_result

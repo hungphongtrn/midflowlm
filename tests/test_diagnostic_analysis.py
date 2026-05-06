@@ -233,3 +233,14 @@ class TestAnalyzeDecoder:
         result = analyze_decoder(str(traces_dir), [1, 8])
         shift = [t for t in result.logit_shift_tests if t["T_a"] == 1 and t["T_b"] == 8][0]
         assert shift["mean_kl_delta"] > 0
+
+
+class TestRunAnalysis:
+    def test_run_analysis_integration(self, tmp_path):
+        traces_dir, probes, _ = _make_fake_traces(tmp_path, [1, 8, 64])
+        from src.diagnostic.analysis import run_analysis, FlowAnalysisResult, DecoderAnalysisResult
+        flow_result, decoder_result = run_analysis(traces_dir, [1, 8, 64])
+        assert isinstance(flow_result, FlowAnalysisResult)
+        assert isinstance(decoder_result, DecoderAnalysisResult)
+        assert 1 in flow_result.per_T_stats
+        assert 1 in decoder_result.per_T_stats
