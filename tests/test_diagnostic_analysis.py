@@ -52,3 +52,64 @@ class TestDecoderAnalysisResult:
         assert result.per_T_stats[1]["accuracy"] == 0.0
         assert result.prediction_stability["always_wrong"] == 8
         assert result.logit_shift_tests[0]["mean_kl_delta"] == 0.8
+
+
+def _make_fake_traces(tmp_path, T_values, endpoint_norms=None):
+    traces_dir = Path(tmp_path) / "traces"
+    probes = [f"probe_{i:03d}" for i in range(5)]
+    default_norms = {t: t * 0.01 for t in T_values}
+    endpoint_norms = endpoint_norms or default_norms
+    for T in T_values:
+        T_dir = traces_dir / f"T{T}"
+        T_dir.mkdir(parents=True, exist_ok=True)
+        flow = {}
+        decoder = {}
+        for pid in probes:
+            flow[pid] = {
+                "probe_id": pid, "benchmark": "mmlu_pro", "T": T,
+                "endpoint_hidden_norm": endpoint_norms[T] + hash(pid) % 100 * 0.001,
+                "per_step_velocity_norms": [0.1] * T,
+                "trajectory_endpoint_norm": endpoint_norms[T] + 0.01,
+                "trajectory_divergence_from_T1": 0.0,
+                "teacher_anchor_distances": {"h8": 0.3},
+            }
+            decoder[pid] = {
+                "probe_id": pid, "benchmark": "mmlu_pro", "T": T,
+                "logits_answer_tokens": {l: -1.0 + hash(pid) % 10 * 0.1 for l in "ABCDEFGHIJ"},
+                "predicted_answer": "C", "predicted_token_id": 17627,
+                "ground_truth_label": "E", "parsed_answer_match": False,
+                "teacher_logits_answer_tokens": {l: -2.0 for l in "ABCDEFGHIJ"},
+                "kl_divergence": 0.5, "js_divergence": 0.3,
+            }
+        with open(T_dir / "flow_traces.json", "w") as f:
+            json.dump(flow, f)
+        with open(T_dir / "decoder_traces.json", "w") as f:
+            json.dump(decoder, f)
+    return str(traces_dir), probes, endpoint_norms
+
+
+class TestAnalyzeFlow:
+    def test_analyze_flow_computes_stats(self, tmp_path):
+        traces_dir, probes, _ = _make_fake_traces(tmp_path, [1, 8])
+        from src.diagnostic.analysis import analyze_flow
+        result = analyze_flow(traces_dir, [1, 8])
+        assert 1 in result.per_T_stats
+        assert 8 in result.per_T_stats
+        assert result.per_T_stats[1]["n"] == len(probes)
+        assert "mean" in result.per_T_stats[1]
+        assert "std" in result.per_T_stats[1]
+
+    def test_analyze_flow_no_change_detected(self, tmp_path):
+        traces_dir, probes, _ = _make_fake_traces(tmp_path, [1, 8], endpoint_norms={1: 0.1, 8: 0.1})
+        from src.diagnostic.analysis import analyze_flow
+        result = analyze_flow(traces_dir, [1, 8])
+        pair_test = [t for t in result.pairwise_tests if t["T_a"] == 1 and t["T_b"] == 8][0]
+        assert pair_test["significant"] is False
+
+    def test_analyze_flow_significant_change(self, tmp_path):
+        traces_dir, probes, _ = _make_fake_traces(tmp_path, [1, 8], endpoint_norms={1: 0.1, 8: 0.5})
+        from src.diagnostic.analysis import analyze_flow
+        result = analyze_flow(traces_dir, [1, 8])
+        pair_test = [t for t in result.pairwise_tests if t["T_a"] == 1 and t["T_b"] == 8][0]
+        assert pair_test["significant"] is True
+        assert abs(pair_test["cohens_d"]) > 0.5
