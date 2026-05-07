@@ -1,0 +1,6 @@
+benchmark,T,accuracy,latency_ms,teacher_accuracy,gap_vs_teacher,is_best
+mmlu_pro,1,0.120000,284.94,0.130000,-0.010000,YES
+mmlu_pro,2,0.120000,281.44,0.130000,-0.010000,
+mmlu_pro,8,0.120000,314.49,0.130000,-0.010000,
+mmlu_pro,16,0.120000,357.32,0.130000,-0.010000,
+mmlu_pro,32,0.120000,442.26,0.130000,-0.010000,

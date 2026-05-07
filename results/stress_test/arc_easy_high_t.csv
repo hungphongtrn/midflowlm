@@ -1,0 +1,4 @@
+experiment_id,model_name,num_steps,accuracy,num_correct,num_total,avg_latency_ms
+P3-D3-HighT,trained_midblock,64,0.6460,323,500,343.90
+P3-D3-HighT,trained_midblock,128,0.6460,323,500,527.51
+P3-D3-HighT,teacher_original,1,0.7720,386,500,88.09

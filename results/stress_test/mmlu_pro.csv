@@ -1,0 +1,7 @@
+experiment_id,model_name,num_steps,accuracy,num_correct,num_total,avg_latency_ms
+P3-D3-Stress,trained_midblock,1,0.1200,12,100,284.94
+P3-D3-Stress,trained_midblock,2,0.1200,12,100,281.44
+P3-D3-Stress,trained_midblock,8,0.1200,12,100,314.49
+P3-D3-Stress,trained_midblock,16,0.1200,12,100,357.32
+P3-D3-Stress,trained_midblock,32,0.1200,12,100,442.26
+P3-D3-Stress,teacher_original,1,0.1300,13,100,420.35

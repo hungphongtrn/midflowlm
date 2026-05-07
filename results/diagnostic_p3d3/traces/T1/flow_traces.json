@@ -1,0 +1,682 @@
+{
+  "mmlu_0": {
+    "probe_id": "mmlu_0",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.2047464847564697,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.2047464847564697,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.9873706102371216,
+      "h9": 1.9500263929367065,
+      "h10": 2.0436649322509766,
+      "h11": 2.146397590637207
+    }
+  },
+  "mmlu_1": {
+    "probe_id": "mmlu_1",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.1355748176574707,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.1355748176574707,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.9124853610992432,
+      "h9": 1.8470865488052368,
+      "h10": 1.9532638788223267,
+      "h11": 2.065676212310791
+    }
+  },
+  "mmlu_2": {
+    "probe_id": "mmlu_2",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 1.9973769187927246,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 1.9973769187927246,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8288379907608032,
+      "h9": 1.7524386644363403,
+      "h10": 1.8657383918762207,
+      "h11": 1.935011863708496
+    }
+  },
+  "mmlu_3": {
+    "probe_id": "mmlu_3",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.005228281021118,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.005228281021118,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8285995721817017,
+      "h9": 1.752163290977478,
+      "h10": 1.860072374343872,
+      "h11": 1.936050534248352
+    }
+  },
+  "mmlu_4": {
+    "probe_id": "mmlu_4",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.0192222595214844,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.0192222595214844,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8734501600265503,
+      "h9": 1.7634254693984985,
+      "h10": 1.8865296840667725,
+      "h11": 1.8981845378875732
+    }
+  },
+  "mmlu_5": {
+    "probe_id": "mmlu_5",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 1.9723196029663086,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 1.9723196029663086,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.829948902130127,
+      "h9": 1.7359848022460938,
+      "h10": 1.8710708618164062,
+      "h11": 1.9004532098770142
+    }
+  },
+  "mmlu_6": {
+    "probe_id": "mmlu_6",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.1507253646850586,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.1507253646850586,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.9285610914230347,
+      "h9": 1.867389440536499,
+      "h10": 1.9834308624267578,
+      "h11": 2.1001226902008057
+    }
+  },
+  "mmlu_7": {
+    "probe_id": "mmlu_7",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.086778402328491,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.086778402328491,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8935407400131226,
+      "h9": 1.8359885215759277,
+      "h10": 1.944583773612976,
+      "h11": 2.054476022720337
+    }
+  },
+  "mmlu_8": {
+    "probe_id": "mmlu_8",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.165264129638672,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.165264129638672,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.956127643585205,
+      "h9": 1.8834702968597412,
+      "h10": 1.9906384944915771,
+      "h11": 2.1038618087768555
+    }
+  },
+  "mmlu_9": {
+    "probe_id": "mmlu_9",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.1526217460632324,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.1526217460632324,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.9654369354248047,
+      "h9": 1.9198371171951294,
+      "h10": 2.0271027088165283,
+      "h11": 2.1235885620117188
+    }
+  },
+  "mmlu_10": {
+    "probe_id": "mmlu_10",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.229069948196411,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.229069948196411,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 2.0232672691345215,
+      "h9": 1.9703798294067383,
+      "h10": 2.0755298137664795,
+      "h11": 2.189732074737549
+    }
+  },
+  "mmlu_11": {
+    "probe_id": "mmlu_11",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.098816156387329,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.098816156387329,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8895373344421387,
+      "h9": 1.8299099206924438,
+      "h10": 1.9378607273101807,
+      "h11": 2.0519745349884033
+    }
+  },
+  "mmlu_12": {
+    "probe_id": "mmlu_12",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 1.9736347198486328,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 1.9736347198486328,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8141202926635742,
+      "h9": 1.727907657623291,
+      "h10": 1.842205286026001,
+      "h11": 1.903834342956543
+    }
+  },
+  "mmlu_13": {
+    "probe_id": "mmlu_13",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.1181845664978027,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.1181845664978027,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.9031431674957275,
+      "h9": 1.848597764968872,
+      "h10": 1.95796537399292,
+      "h11": 2.0706024169921875
+    }
+  },
+  "mmlu_14": {
+    "probe_id": "mmlu_14",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.1220285892486572,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.1220285892486572,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.917892575263977,
+      "h9": 1.849435806274414,
+      "h10": 1.9725008010864258,
+      "h11": 2.0585849285125732
+    }
+  },
+  "mmlu_15": {
+    "probe_id": "mmlu_15",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.138760805130005,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.138760805130005,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.9166040420532227,
+      "h9": 1.8557288646697998,
+      "h10": 1.949004888534546,
+      "h11": 2.0712804794311523
+    }
+  },
+  "mmlu_16": {
+    "probe_id": "mmlu_16",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.1312756538391113,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.1312756538391113,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.922524333000183,
+      "h9": 1.857159972190857,
+      "h10": 1.9682115316390991,
+      "h11": 2.0824270248413086
+    }
+  },
+  "mmlu_17": {
+    "probe_id": "mmlu_17",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.1462981700897217,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.1462981700897217,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.9586714506149292,
+      "h9": 1.899689793586731,
+      "h10": 2.0206096172332764,
+      "h11": 2.0984909534454346
+    }
+  },
+  "mmlu_18": {
+    "probe_id": "mmlu_18",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 1.9877957105636597,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 1.9877957105636597,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8093336820602417,
+      "h9": 1.7497626543045044,
+      "h10": 1.8585466146469116,
+      "h11": 1.9228119850158691
+    }
+  },
+  "mmlu_19": {
+    "probe_id": "mmlu_19",
+    "benchmark": "mmlu_pro",
+    "T": 1,
+    "endpoint_hidden_norm": 2.062354803085327,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.062354803085327,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8624893426895142,
+      "h9": 1.8180248737335205,
+      "h10": 1.9521352052688599,
+      "h11": 2.0133590698242188
+    }
+  },
+  "arc_20": {
+    "probe_id": "arc_20",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.081165313720703,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.081165313720703,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.880536437034607,
+      "h9": 1.8239730596542358,
+      "h10": 1.9061740636825562,
+      "h11": 2.026325225830078
+    }
+  },
+  "arc_21": {
+    "probe_id": "arc_21",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.0416154861450195,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.0416154861450195,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8398568630218506,
+      "h9": 1.7684296369552612,
+      "h10": 1.8461613655090332,
+      "h11": 1.9676421880722046
+    }
+  },
+  "arc_22": {
+    "probe_id": "arc_22",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.068894147872925,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.068894147872925,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8724695444107056,
+      "h9": 1.8142390251159668,
+      "h10": 1.9005681276321411,
+      "h11": 2.015652894973755
+    }
+  },
+  "arc_23": {
+    "probe_id": "arc_23",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.0784966945648193,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.0784966945648193,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8784021139144897,
+      "h9": 1.8143930435180664,
+      "h10": 1.891725778579712,
+      "h11": 2.007664203643799
+    }
+  },
+  "arc_24": {
+    "probe_id": "arc_24",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.073303461074829,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.073303461074829,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.874632477760315,
+      "h9": 1.8047219514846802,
+      "h10": 1.8760488033294678,
+      "h11": 1.9875872135162354
+    }
+  },
+  "arc_25": {
+    "probe_id": "arc_25",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.09228777885437,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.09228777885437,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8868064880371094,
+      "h9": 1.8322137594223022,
+      "h10": 1.9185831546783447,
+      "h11": 2.057098627090454
+    }
+  },
+  "arc_26": {
+    "probe_id": "arc_26",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.0749683380126953,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.0749683380126953,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8704760074615479,
+      "h9": 1.8014581203460693,
+      "h10": 1.8991515636444092,
+      "h11": 2.0203404426574707
+    }
+  },
+  "arc_27": {
+    "probe_id": "arc_27",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.0688729286193848,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.0688729286193848,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8692121505737305,
+      "h9": 1.7922922372817993,
+      "h10": 1.8654844760894775,
+      "h11": 1.990706205368042
+    }
+  },
+  "arc_28": {
+    "probe_id": "arc_28",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.038214921951294,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.038214921951294,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.850498080253601,
+      "h9": 1.793167233467102,
+      "h10": 1.8983180522918701,
+      "h11": 2.0002059936523438
+    }
+  },
+  "arc_29": {
+    "probe_id": "arc_29",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.0511586666107178,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.0511586666107178,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8475139141082764,
+      "h9": 1.7782679796218872,
+      "h10": 1.8486223220825195,
+      "h11": 1.9652427434921265
+    }
+  },
+  "arc_30": {
+    "probe_id": "arc_30",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.00947642326355,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.00947642326355,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8233717679977417,
+      "h9": 1.7611361742019653,
+      "h10": 1.8334190845489502,
+      "h11": 1.9238395690917969
+    }
+  },
+  "arc_31": {
+    "probe_id": "arc_31",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.053825616836548,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.053825616836548,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8531582355499268,
+      "h9": 1.7922511100769043,
+      "h10": 1.8742209672927856,
+      "h11": 1.9857548475265503
+    }
+  },
+  "arc_32": {
+    "probe_id": "arc_32",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.094412326812744,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.094412326812744,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8957338333129883,
+      "h9": 1.837242841720581,
+      "h10": 1.9388549327850342,
+      "h11": 2.0495569705963135
+    }
+  },
+  "arc_33": {
+    "probe_id": "arc_33",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.061798572540283,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.061798572540283,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8617959022521973,
+      "h9": 1.7885875701904297,
+      "h10": 1.8696027994155884,
+      "h11": 1.9901901483535767
+    }
+  },
+  "arc_34": {
+    "probe_id": "arc_34",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.072988986968994,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.072988986968994,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8700529336929321,
+      "h9": 1.8062399625778198,
+      "h10": 1.8826943635940552,
+      "h11": 2.002930164337158
+    }
+  },
+  "arc_35": {
+    "probe_id": "arc_35",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.0821735858917236,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.0821735858917236,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8731707334518433,
+      "h9": 1.79424250125885,
+      "h10": 1.8662221431732178,
+      "h11": 1.9986134767532349
+    }
+  },
+  "arc_36": {
+    "probe_id": "arc_36",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.1048569679260254,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.1048569679260254,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.894957423210144,
+      "h9": 1.8229647874832153,
+      "h10": 1.8980644941329956,
+      "h11": 2.020367383956909
+    }
+  },
+  "arc_37": {
+    "probe_id": "arc_37",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.0303027629852295,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.0303027629852295,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8283178806304932,
+      "h9": 1.761762022972107,
+      "h10": 1.8378715515136719,
+      "h11": 1.9436137676239014
+    }
+  },
+  "arc_38": {
+    "probe_id": "arc_38",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.0334441661834717,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.0334441661834717,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.836733102798462,
+      "h9": 1.762877345085144,
+      "h10": 1.841671347618103,
+      "h11": 1.9497828483581543
+    }
+  },
+  "arc_39": {
+    "probe_id": "arc_39",
+    "benchmark": "arc_easy",
+    "T": 1,
+    "endpoint_hidden_norm": 2.0783329010009766,
+    "per_step_velocity_norms": [
+      0.0
+    ],
+    "trajectory_endpoint_norm": 2.0783329010009766,
+    "trajectory_divergence_from_T1": 0.0,
+    "teacher_anchor_distances": {
+      "h8": 1.8749910593032837,
+      "h9": 1.8032290935516357,
+      "h10": 1.8797996044158936,
+      "h11": 1.9822649955749512
+    }
+  }
+}
