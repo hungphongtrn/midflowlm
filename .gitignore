@@ -6,6 +6,9 @@ __pycache__/
 .agent*
 .opencode/
 *cache/
+
+# External repositories
+external/
 uv.lock
 outputs/uv.lock
 
