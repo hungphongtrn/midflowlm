@@ -17,6 +17,7 @@ dependencies = [
     "tqdm",
     "accelerate",
     "wandb",
+    "liger-kernel>=0.8.0",
 ]
 
 [tool.uv.sources]
