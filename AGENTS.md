@@ -1,6 +1,5 @@
 # AGENTS.md
 
-- **Always run "beans prime" at the task! **
 - All implemenetations go into `src` at root
 
 Repository working rules for Hermes and other coding agents.
@@ -63,3 +62,21 @@ Repository working rules for Hermes and other coding agents.
 
 ### IMPORTANT: DO NOT BUILD THE PACKAGE
 This project uses editable/development mode only. Never run `uv sync`, `pip install -e .`, or any package build commands. Dependencies are managed via requirements.txt and pyproject.toml for documentation only.
+
+## Agent skills
+
+### Engineering workflow
+
+Before using skills under `skills/engineering/`, consult `WORKFLOW.md` to choose the appropriate workflow. Treat `WORKFLOW.md` as the workflow router and operating model; treat individual `SKILL.md` files as detailed procedures.
+
+### Issue tracker
+
+GitHub Issues (`hungphongtrn/midflowlm`) are the durable project memory for PRDs, issue decomposition, triage, implementation plans, review outcomes, and closure. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Labels follow the standard vocabulary: `bug`, `enhancement`, `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repo layout. Context documentation will be created lazily via `/grill-with-docs` when domain terms need resolution. See `docs/agents/domain.md`.
