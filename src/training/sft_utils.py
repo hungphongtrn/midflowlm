@@ -34,7 +34,8 @@ class MidblockMetricsCallback(TrainerCallback):
     def on_train_begin(self, args, state, control, model=None, **kwargs):
         if model is not None and hasattr(model, "trainable_params"):
             logger.info("Trainable parameters: %s", f"{model.trainable_params:,}")
-            logger.info("Frozen parameters:    %s", f"{model.frozen_params:,}")
+            if hasattr(model, "frozen_params"):
+                logger.info("Frozen parameters:    %s", f"{model.frozen_params:,}")
 
 
 def validate_model_for_training(model) -> None:
@@ -58,10 +59,11 @@ def validate_model_for_training(model) -> None:
             frozen_midblock,
         )
 
-    if model.thinking_level != 32:
+    thinking_level = getattr(model, "thinking_level", None)
+    if thinking_level is not None and thinking_level != 32:
         logger.warning(
             "thinking_level=%s, expected 32 for this experiment",
-            model.thinking_level,
+            thinking_level,
         )
 
     logger.info("Model validation: PASSED")

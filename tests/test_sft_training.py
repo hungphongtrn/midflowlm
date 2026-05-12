@@ -37,6 +37,22 @@ class TestEstimateTrainingBudget:
         assert budget["total_tokens"] > 0
         assert budget["estimated_hours"] > 0
 
+    def test_budget_has_expected_keys(self):
+        budget = estimate_training_budget(
+            num_sequences=10,
+            seq_length=128,
+            batch_size=1,
+            grad_accum=1,
+            num_epochs=1,
+        )
+        assert set(budget.keys()) == {
+            "total_steps",
+            "total_tokens",
+            "estimated_hours",
+            "effective_batch_size",
+            "steps_per_epoch",
+        }
+
     def test_zero_sequences(self):
         budget = estimate_training_budget(
             num_sequences=0,
@@ -73,3 +89,22 @@ class TestValidateModelForTraining:
         model.add_trainable_midblock("qwen.layers.0.weight")
         with pytest.raises(ValueError, match="Non-midblock"):
             validate_model_for_training(model)
+
+    def test_warns_on_frozen_midblock(self, caplog):
+        model = self.MockModel()
+        parameter = torch.nn.Parameter(torch.randn(3, 3), requires_grad=False)
+        model._params["midblock.0.weight"] = parameter
+
+        with caplog.at_level("WARNING"):
+            validate_model_for_training(model)
+
+        assert "Midblock parameters are frozen" in caplog.text
+
+    def test_warns_on_wrong_thinking_level(self, caplog):
+        model = self.MockModel(thinking_level=16)
+        model.add_trainable_midblock("midblock.0.weight")
+
+        with caplog.at_level("WARNING"):
+            validate_model_for_training(model)
+
+        assert "thinking_level=16, expected 32 for this experiment" in caplog.text
