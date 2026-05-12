@@ -50,10 +50,8 @@ def test_midblock_grad_norm_logged_nonzero(tmp_path):
     )
     trainer.train()
 
-    # Verify grad_norm was captured (on_pre_optimizer_step fires
-    # while gradients are still attached, before optimizer step)
     assert callback._last_grad_norm > 0.0, (
         f"Expected grad_norm > 0, got {callback._last_grad_norm}. "
-        "on_pre_optimizer_step must receive model with midblock "
-        "and capture gradient norm before optimizer consumes grads."
+        "on_pre_optimizer_step must fire on stored model reference "
+        "to capture midblock gradient norm before optimizer step."
     )

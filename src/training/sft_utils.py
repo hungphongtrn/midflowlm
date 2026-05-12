@@ -1,11 +1,31 @@
 """HF Trainer callbacks and utilities for SFT training with FlowMidblock."""
 
 import logging
+import os
 
 import torch
 from transformers import TrainerCallback
 
 logger = logging.getLogger(__name__)
+
+
+class MidblockSaveCallback(TrainerCallback):
+    """Saves only midblock weights on HF Trainer checkpoint events.
+
+    Redundant full-model saves (frozen Qwen backbone) are wasteful — only the
+    midblock changes during training.  This callback overwrites the checkpoint
+    directory with a compact ``midblock.pth`` on every ``on_save`` event.
+    """
+
+    def on_save(self, args, state, control, **kwargs):
+        model = kwargs.get("model")
+        if model is None or not hasattr(model, "midblock"):
+            return
+        output_dir = os.path.join(args.output_dir, f"checkpoint-{state.global_step}")
+        os.makedirs(output_dir, exist_ok=True)
+        save_path = os.path.join(output_dir, "midblock.pth")
+        torch.save(model.midblock.state_dict(), save_path)
+        logger.info("Midblock checkpoint saved to %s", save_path)
 
 
 class MidblockMetricsCallback(TrainerCallback):

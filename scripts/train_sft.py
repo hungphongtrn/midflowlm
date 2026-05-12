@@ -27,6 +27,7 @@ from datasets import load_from_disk
 from src.model.sft_flow_midblock import SFTFlowMidblockModel
 from src.training.sft_utils import (
     MidblockMetricsCallback,
+    MidblockSaveCallback,
     validate_model_for_training,
     estimate_training_budget,
 )
@@ -139,6 +140,7 @@ def main():
         save_strategy=training_cfg.get("save_strategy", "steps"),
         save_steps=training_cfg.get("save_steps", 500),
         save_total_limit=training_cfg.get("save_total_limit", 2),
+        save_only_model=False,
         load_best_model_at_end=training_cfg.get("eval_strategy", "steps") != "no",
         # Logging
         logging_dir=os.path.join(output_dir, "logs"),
@@ -172,7 +174,7 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
-        callbacks=[MidblockMetricsCallback()],
+        callbacks=[MidblockMetricsCallback(), MidblockSaveCallback()],
     )
 
     # 8. Train
@@ -184,17 +186,7 @@ def main():
         resume_from_checkpoint=training_args.resume_from_checkpoint,
     )
 
-    # 9. Save final model
-    logger.info("Saving final model...")
-    midblock_save_path = os.path.join(output_dir, "midblock_final.pth")
-    torch.save(model.midblock.state_dict(), midblock_save_path)
-    logger.info(f"Midblock weights saved to {midblock_save_path}")
-
-    full_save_path = os.path.join(output_dir, "model_final.pth")
-    torch.save(model.state_dict(), full_save_path)
-    logger.info(f"Full model saved to {full_save_path}")
-
-    # 10. Metrics summary
+    # 9. Metrics summary
     logger.info("\n" + "=" * 60)
     logger.info("TRAINING COMPLETE")
     logger.info("=" * 60)
