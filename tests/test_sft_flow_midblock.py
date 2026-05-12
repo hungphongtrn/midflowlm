@@ -4,10 +4,14 @@ from src.model.sft_flow_midblock import SFTFlowMidblockModel
 
 CHECKPOINT_PATH = "models/p3_d3_mix_c/checkpoint.pth"
 
+pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA GPU required")
+
 
 @pytest.fixture(scope="module")
 def model():
-    return SFTFlowMidblockModel(checkpoint_path=CHECKPOINT_PATH)
+    m = SFTFlowMidblockModel(checkpoint_path=CHECKPOINT_PATH)
+    m.to("cuda")
+    return m
 
 
 class TestSFTFlowMidblockParameterCounts:
@@ -44,8 +48,9 @@ class TestSFTFlowMidblockWarmStart:
 class TestSFTFlowMidblockForward:
     def test_forward_produces_logits(self, model):
         model.eval()
-        input_ids = torch.randint(0, 1000, (2, 64))
-        attention_mask = torch.ones(2, 64)
+        device = next(model.parameters()).device
+        input_ids = torch.randint(0, 1000, (2, 64), device=device)
+        attention_mask = torch.ones(2, 64, device=device)
         with torch.no_grad():
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
         assert "logits" in outputs
@@ -54,7 +59,8 @@ class TestSFTFlowMidblockForward:
 
     def test_forward_with_labels_produces_loss(self, model):
         model.train()
-        input_ids = torch.randint(0, 1000, (2, 64))
+        device = next(model.parameters()).device
+        input_ids = torch.randint(0, 1000, (2, 64), device=device)
         labels = input_ids.clone()
         outputs = model(input_ids=input_ids, labels=labels)
         assert "loss" in outputs
@@ -63,7 +69,8 @@ class TestSFTFlowMidblockForward:
 
     def test_gradients_only_flow_to_midblock(self, model):
         model.train()
-        input_ids = torch.randint(0, 1000, (2, 64))
+        device = next(model.parameters()).device
+        input_ids = torch.randint(0, 1000, (2, 64), device=device)
         labels = input_ids.clone()
         outputs = model(input_ids=input_ids, labels=labels)
         outputs["loss"].backward()
