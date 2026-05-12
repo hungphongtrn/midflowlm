@@ -20,8 +20,8 @@ New implementer? Read in this order:
 | Phase | Status | Outcome | Document |
 |-------|--------|---------|----------|
 | 1 — Model Wrapper | ✅ Complete | FlowMidblock patched into frozen Qwen, warm-started from P3-D3, HF Trainer compatible | [phase-01-model-wrapper.md](./phase-01-model-wrapper.md) |
-| 2 — Data Pipeline | 🔲 Pending | GLM-5.1-Reasoning-1M filtered, tokenized, packed | [phase-02-data-pipeline.md](./phase-02-data-pipeline.md) |
-| 3 — Training & Smoke Test | 🔲 Pending | CE-only SFT trains on RTX 3060, full-run documented for 24GB+ | Stub only |
+| 2 — Data Pipeline | 📋 Detailed | GLM-5.1-Reasoning-1M filtered, tokenized, packed | [phase-02-data-pipeline.md](./phase-02-data-pipeline.md) |
+| 3 — Training & Smoke Test | 📋 Detailed | CE-only SFT trains on RTX 3060, full-run documented for 24GB+ | [phase-03-training-smoke-test.md](./phase-03-training-smoke-test.md) |
 | 4 — Evaluation | 🔲 Pending | Multi-T eval with fixed-T accuracy, oracle, prediction-change rate | Stub only |
 
 ## Key Decisions
