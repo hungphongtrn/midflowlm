@@ -1,0 +1,28 @@
+# Reasoning SFT data preparation config
+# Used by scripts/prepare_reasoning_sft_data.py
+
+dataset:
+  name: "Jackrong/GLM-5.1-Reasoning-1M-Cleaned"
+  split: "train"
+
+model:
+  name: "Qwen/Qwen3.5-0.8B"
+  max_seq_length: 8192
+
+processing:
+  max_total_tokens: 8192  # input_tokens + output_tokens budget
+  num_proc: 4
+  val_split: 0.02
+  max_train_samples: null  # Set to 100000 for full run, leave null for all
+  max_eval_samples: 200
+  packing_strategy: "bfd"
+  seed: 1337
+
+output:
+  dir: "./data/reasoning_sft"
+  train_subdir: "train"
+  eval_subdir: "eval"
+
+smoke_test:
+  max_train_samples: 500
+  max_eval_samples: 50
