@@ -15,6 +15,11 @@ from src.utils.dataset_processing import (
 def filter_by_token_budget(
     dataset: Dataset, max_total_tokens: int = 8192, **kwargs: Any
 ) -> Dataset:
+    """Filter samples by input+output token budget.
+
+    Additional keyword arguments are forwarded to ``Dataset.filter``.
+    """
+
     def _within_budget(example: dict[str, Any]) -> bool:
         meta = example.get("meta")
         if not isinstance(meta, dict):
@@ -23,7 +28,13 @@ def filter_by_token_budget(
         output_tokens = meta.get("output_tokens")
         if input_tokens is None or output_tokens is None:
             return True
-        return int(input_tokens) + int(output_tokens) <= max_total_tokens
+        try:
+            total_tokens = int(input_tokens) + int(output_tokens)
+        except (TypeError, ValueError):
+            # Keep malformed meta values to avoid dropping potentially useful
+            # samples due to metadata issues.
+            return True
+        return total_tokens <= max_total_tokens
 
     return dataset.filter(_within_budget, **kwargs)
 
@@ -44,7 +55,7 @@ def tokenize_reasoning_dataset(
             elif src_role in {"gpt", "assistant"}:
                 role = "assistant"
             else:
-                role = src_role if src_role else "user"
+                role = "user"
             mapped.append({"role": role, "content": turn.get("value", "")})
         return mapped
 
@@ -80,7 +91,18 @@ def create_reasoning_sft_datasets(
     max_eval_samples: int | None = None,
     seed: int = 1337,
 ) -> tuple[Dataset, Dataset]:
+    if not 0 < val_split < 1:
+        raise ValueError(
+            f"val_split must be in the open interval (0, 1), got {val_split}."
+        )
+
     filtered = filter_by_token_budget(dataset, max_total_tokens=max_length)
+    if len(filtered) == 0:
+        raise ValueError(
+            "No samples available after token-budget filtering. "
+            "Check max_length/max_total_tokens or input metadata."
+        )
+
     shuffled = filtered.shuffle(seed=seed)
 
     split = shuffled.train_test_split(test_size=val_split, seed=seed)
@@ -91,6 +113,12 @@ def create_reasoning_sft_datasets(
         train_raw = train_raw.select(range(min(max_train_samples, len(train_raw))))
     if max_eval_samples is not None:
         eval_raw = eval_raw.select(range(min(max_eval_samples, len(eval_raw))))
+
+    if len(train_raw) == 0 or len(eval_raw) == 0:
+        raise ValueError(
+            "Train/eval split produced an empty dataset after subsampling. "
+            "Increase sample limits or adjust val_split."
+        )
 
     train_tok = tokenize_reasoning_dataset(
         train_raw, tokenizer, max_length=max_length, num_proc=num_proc

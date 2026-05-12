@@ -64,6 +64,25 @@ def test_filter_by_token_budget_filters_and_keeps_missing_meta():
     assert remaining_total_tokens == [60]
 
 
+def test_filter_by_token_budget_keeps_malformed_token_counts():
+    from src.data.reasoning_sft import filter_by_token_budget
+
+    ds = Dataset.from_list(
+        [
+            {
+                "conversations": [
+                    {"from": "human", "value": "Q"},
+                    {"from": "gpt", "value": "A"},
+                ],
+                "meta": {"input_tokens": "N/A", "output_tokens": 5},
+            }
+        ]
+    )
+
+    filtered = filter_by_token_budget(ds, max_total_tokens=10)
+    assert len(filtered) == 1
+
+
 def _find_subsequence(seq, subseq):
     for i in range(len(seq) - len(subseq) + 1):
         if seq[i : i + len(subseq)] == subseq:
@@ -209,3 +228,90 @@ def test_train_val_are_disjoint_by_content():
     train_rows = {tuple(ex["input_ids"]) for ex in train_ds}
     val_rows = {tuple(ex["input_ids"]) for ex in val_ds}
     assert train_rows.isdisjoint(val_rows)
+
+
+def test_create_reasoning_sft_datasets_validates_val_split():
+    from src.data.reasoning_sft import create_reasoning_sft_datasets
+
+    ds = _mock_reasoning_dataset()
+    with patch("src.data.reasoning_sft.pack_tokenized_dataset", lambda d, **_: d):
+        try:
+            create_reasoning_sft_datasets(
+                ds,
+                DummyTokenizer(),
+                max_length=64,
+                num_proc=1,
+                val_split=0.0,
+                seed=7,
+            )
+            assert False, "Expected ValueError for invalid val_split"
+        except ValueError as exc:
+            assert "val_split" in str(exc)
+
+
+def test_create_reasoning_sft_datasets_raises_when_empty_after_filtering():
+    from src.data.reasoning_sft import create_reasoning_sft_datasets
+
+    ds = Dataset.from_list(
+        [
+            {
+                "conversations": [
+                    {"from": "human", "value": "Q"},
+                    {"from": "gpt", "value": "A"},
+                ],
+                "meta": {"input_tokens": 1000, "output_tokens": 1000},
+            }
+        ]
+    )
+
+    with patch("src.data.reasoning_sft.pack_tokenized_dataset", lambda d, **_: d):
+        try:
+            create_reasoning_sft_datasets(
+                ds,
+                DummyTokenizer(),
+                max_length=10,
+                num_proc=1,
+                val_split=0.5,
+                seed=7,
+            )
+            assert False, "Expected ValueError for empty dataset after filtering"
+        except ValueError as exc:
+            assert "after token-budget filtering" in str(exc)
+
+
+def test_create_reasoning_sft_datasets_raises_when_empty_after_subsampling():
+    from src.data.reasoning_sft import create_reasoning_sft_datasets
+
+    ds = Dataset.from_list(
+        [
+            {
+                "conversations": [
+                    {"from": "human", "value": "Q1"},
+                    {"from": "gpt", "value": "A1"},
+                ],
+                "meta": {"input_tokens": 5, "output_tokens": 5},
+            },
+            {
+                "conversations": [
+                    {"from": "human", "value": "Q2"},
+                    {"from": "gpt", "value": "A2"},
+                ],
+                "meta": {"input_tokens": 5, "output_tokens": 5},
+            },
+        ]
+    )
+
+    with patch("src.data.reasoning_sft.pack_tokenized_dataset", lambda d, **_: d):
+        try:
+            create_reasoning_sft_datasets(
+                ds,
+                DummyTokenizer(),
+                max_length=64,
+                num_proc=1,
+                val_split=0.5,
+                max_eval_samples=0,
+                seed=7,
+            )
+            assert False, "Expected ValueError for empty split after subsampling"
+        except ValueError as exc:
+            assert "after subsampling" in str(exc)
