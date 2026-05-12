@@ -150,13 +150,28 @@ class SFTFlowMidblockModel(nn.Module):
         if not os.path.exists(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-        model_state = checkpoint["model_state_dict"]
 
-        midblock_state = {}
-        for key, value in model_state.items():
-            if key.startswith("midblock."):
-                new_key = key[len("midblock."):]
-                midblock_state[new_key] = value
+        if "model_state_dict" in checkpoint:
+            # Old format: {"model_state_dict": {"midblock.time_proj.weight": ..., ...}}
+            model_state = checkpoint["model_state_dict"]
+            midblock_state = {}
+            for key, value in model_state.items():
+                if key.startswith("midblock."):
+                    new_key = key[len("midblock."):]
+                    midblock_state[new_key] = value
+        elif "midblock_state_dict" in checkpoint:
+            # Intermediate format: {"midblock_state_dict": {...}}
+            midblock_state = checkpoint["midblock_state_dict"]
+        elif isinstance(checkpoint, dict) and any("proj" in k or "norm" in k or "refiner" in k or "adapt" in k for k in list(checkpoint.keys())[:3]):
+            # New format: flat FlowMidblock state_dict directly
+            # (keys look like "time_proj.weight", "velocity_proj.1.weight", etc.)
+            midblock_state = checkpoint
+        else:
+            raise ValueError(
+                f"Unrecognized checkpoint format at {checkpoint_path}. "
+                f"Expected 'model_state_dict', 'midblock_state_dict', or flat FlowMidblock keys. "
+                f"Got top-level keys: {list(checkpoint.keys())[:5]}"
+            )
 
         missing, unexpected = self.midblock.load_state_dict(midblock_state, strict=False)
         logger.info(f"Warm-started midblock from {checkpoint_path}")
@@ -169,12 +184,12 @@ class SFTFlowMidblockModel(nn.Module):
         midblock = self.midblock
         start_layer = self.start_layer
         end_layer = self.end_layer
-        thinking_level = self.thinking_level
         embed_tokens = self.embed_tokens
         layers = self.layers
         norm = self.norm
         num_layers = self.num_layers
         rotary_emb = getattr(self.base_model, "rotary_emb", None)
+        parent_model = self
 
         def patched_forward(
             self_model,
@@ -206,10 +221,10 @@ class SFTFlowMidblockModel(nn.Module):
                 layer_output = layers[i](hidden_states, position_embeddings=position_embeddings)
                 hidden_states = layer_output[0] if isinstance(layer_output, tuple) else layer_output
 
+            num_steps = kwargs.pop("num_steps", parent_model.thinking_level)
             hidden_states = midblock.iterative_refinement(
                 h_start=hidden_states,
-                num_steps=thinking_level,
-                attention_mask=attention_mask,
+                num_steps=num_steps,
             )
             # FlowMidblock may produce float32; cast back to Qwen dtype
             hidden_states = hidden_states.to(qwen_dtype)
