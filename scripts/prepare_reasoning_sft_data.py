@@ -21,6 +21,9 @@ from src.data.reasoning_sft import create_reasoning_sft_datasets
 
 DATASET_NAME = "Jackrong/GLM-5.1-Reasoning-1M-Cleaned"
 MODEL_NAME = "Qwen/Qwen3.5-0.8B"
+IGNORE_INDEX = -100
+SMOKE_TEST_SAMPLE_LIMIT = 1000
+SMOKE_TEST_DEFAULT_TRAIN = 500
 
 
 def main() -> None:
@@ -64,8 +67,8 @@ def main() -> None:
     print(f"  Loaded {len(ds):,} raw samples")
 
     if args.smoke_test:
-        ds = ds.select(range(min(1000, len(ds))))
-        args.max_train_samples = min(args.max_train_samples or 500, len(ds))
+        ds = ds.select(range(min(SMOKE_TEST_SAMPLE_LIMIT, len(ds))))
+        args.max_train_samples = min(args.max_train_samples or SMOKE_TEST_DEFAULT_TRAIN, len(ds))
         print(f"  [SMOKE TEST] Subset to {len(ds)} samples")
 
     train_ds, eval_ds = create_reasoning_sft_datasets(
@@ -95,7 +98,7 @@ def main() -> None:
     for i in range(min(3, len(train_ds))):
         ids = train_ds[i]["input_ids"]
         labels = train_ds[i]["labels"]
-        active = sum(1 for label in labels if label != -100)
+        active = sum(1 for label in labels if label != IGNORE_INDEX)
         total_tokens = len(ids)
         print(f"  [{i}] total_tokens={total_tokens}, active_labels={active}")
 
