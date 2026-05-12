@@ -1,0 +1,35 @@
+{
+  "issue": 12,
+  "seed": 1337,
+  "device": "NVIDIA GeForce RTX 3060",
+  "thinking_level": 32,
+  "results": [
+    {
+      "seq_len": 512,
+      "ok": true,
+      "peak_allocated_mb": 1902.76,
+      "peak_reserved_mb": 1922.0,
+      "active_peak_mb": 1902.76,
+      "allocated_peak_mb": 1902.76,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 768,
+      "ok": true,
+      "peak_allocated_mb": 2086.93,
+      "peak_reserved_mb": 2110.0,
+      "active_peak_mb": 2086.93,
+      "allocated_peak_mb": 2086.93,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 1024,
+      "ok": false,
+      "oom_error": "CUDA out of memory. Tried to allocate 2.00 MiB. GPU 0 has a total capacity of 11.62 GiB of which 2.69 MiB is free. Process 1869496 has 9.24 GiB memory in use. Including non-PyTorch memory, this process has 2.36 GiB memory in use. Of the allocated memory 2.19 GiB is allocated by PyTorch, and 33.95 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "memory_summary": "|===========================================================================|\n|                  PyTorch CUDA memory summary, device ID 0                 |\n|---------------------------------------------------------------------------|\n|            CUDA OOMs: 1            |        cudaMalloc retries: 1         |\n|===========================================================================|\n|        Metric         | Cur Usage  | Peak Usage | Tot Alloc  | Tot Freed  |\n|---------------------------------------------------------------------------|\n| Allocated memory      |   2236 MiB |   2243 MiB |  12732 MiB |  12033 MiB |\n|---------------------------------------------------------------------------|\n| Active memory         |   2236 MiB |   2243 MiB |  12732 MiB |  12033 MiB |\n|---------------------------------------------------------------------------|\n| Requested memory      |   2236 MiB |   2243 MiB |  12731 MiB |  12033 MiB |\n|---------------------------------------------------------------------------|\n| GPU reserved memory   |   2272 MiB |   2272 MiB | 731136 KiB |      0 B   |\n|---------------------------------------------------------------------------|\n| Non-releasable memory |      0 B   |      0 B   |      0 B   |      0 B   |\n|---------------------------------------------------------------------------|\n| Allocations           |     644    |     647    |    2546    |    2248    |\n|---------------------------------------------------------------------------|\n| Active allocs         |     644    |     647    |    2546    |    2248    |\n|---------------------------------------------------------------------------|\n| GPU reserved segments |       0    |       0    |       0    |       0    |\n|---------------------------------------------------------------------------|\n| Non-releasable allocs |       0    |       0    |       0    |       0    |\n|---------------------------------------------------------------------------|\n| Oversize allocations  |       0    |       0    |       0    |       0    |\n|---------------------------------------------------------------------------|\n| Oversize GPU segments |       0    |       0    |       0    |       0    |\n|===========================================================================|\n"
+    }
+  ],
+  "first_oom_seq_len": 1024
+}

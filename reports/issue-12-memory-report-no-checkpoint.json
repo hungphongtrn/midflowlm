@@ -1,0 +1,65 @@
+{
+  "issue": 12,
+  "seed": 1337,
+  "device": "NVIDIA GeForce RTX 3060",
+  "thinking_level": 32,
+  "results": [
+    {
+      "seq_len": 512,
+      "ok": true,
+      "peak_allocated_mb": 4215.94,
+      "peak_reserved_mb": 4248.0,
+      "active_peak_mb": 4215.94,
+      "allocated_peak_mb": 4215.94,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 768,
+      "ok": true,
+      "peak_allocated_mb": 5753.73,
+      "peak_reserved_mb": 5766.0,
+      "active_peak_mb": 5753.73,
+      "allocated_peak_mb": 5753.73,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 1024,
+      "ok": true,
+      "peak_allocated_mb": 7425.06,
+      "peak_reserved_mb": 7446.0,
+      "active_peak_mb": 7425.06,
+      "allocated_peak_mb": 7425.06,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 1280,
+      "ok": true,
+      "peak_allocated_mb": 9225.34,
+      "peak_reserved_mb": 9242.0,
+      "active_peak_mb": 9225.34,
+      "allocated_peak_mb": 9225.34,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 1536,
+      "ok": true,
+      "peak_allocated_mb": 11159.04,
+      "peak_reserved_mb": 11184.0,
+      "active_peak_mb": 11159.04,
+      "allocated_peak_mb": 11159.04,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 1792,
+      "ok": false,
+      "oom_error": "CUDA out of memory. Tried to allocate 98.00 MiB. GPU 0 has a total capacity of 11.62 GiB of which 39.81 MiB is free. Including non-PyTorch memory, this process has 11.57 GiB memory in use. Of the allocated memory 11.40 GiB is allocated by PyTorch, and 20.07 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "memory_summary": "|===========================================================================|\n|                  PyTorch CUDA memory summary, device ID 0                 |\n|---------------------------------------------------------------------------|\n|            CUDA OOMs: 1            |        cudaMalloc retries: 1         |\n|===========================================================================|\n|        Metric         | Cur Usage  | Peak Usage | Tot Alloc  | Tot Freed  |\n|---------------------------------------------------------------------------|\n| Allocated memory      |  11579 MiB |  11677 MiB |  25573 MiB |  15529 MiB |\n|---------------------------------------------------------------------------|\n| Active memory         |  11579 MiB |  11677 MiB |  25573 MiB |  15529 MiB |\n|---------------------------------------------------------------------------|\n| Requested memory      |  11579 MiB |  11677 MiB |  25573 MiB |  15529 MiB |\n|---------------------------------------------------------------------------|\n| GPU reserved memory   |  11698 MiB |  11698 MiB |  10122 MiB |      0 B   |\n|---------------------------------------------------------------------------|\n| Non-releasable memory |      0 B   |      0 B   |      0 B   |      0 B   |\n|---------------------------------------------------------------------------|\n| Allocations           |    1114    |    1115    |    2005    |    1236    |\n|---------------------------------------------------------------------------|\n| Active allocs         |    1114    |    1115    |    2005    |    1236    |\n|---------------------------------------------------------------------------|\n| GPU reserved segments |       0    |       0    |       0    |       0    |\n|---------------------------------------------------------------------------|\n| Non-releasable allocs |       0    |       0    |       0    |       0    |\n|---------------------------------------------------------------------------|\n| Oversize allocations  |       0    |       0    |       0    |       0    |\n|---------------------------------------------------------------------------|\n| Oversize GPU segments |       0    |       0    |       0    |       0    |\n|===========================================================================|\n"
+    }
+  ],
+  "first_oom_seq_len": 1792
+}

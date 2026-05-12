@@ -11,25 +11,50 @@ logger = logging.getLogger(__name__)
 class MidblockMetricsCallback(TrainerCallback):
     """Custom HF Trainer callback that logs FlowMidblock-specific metrics."""
 
+    def __init__(self):
+        super().__init__()
+        self._last_grad_norm = 0.0
+
+    def _resolve_midblock(self, model):
+        if model is None:
+            return None
+        if hasattr(model, "midblock"):
+            return model.midblock
+        if hasattr(model, "module") and hasattr(model.module, "midblock"):
+            return model.module.midblock
+        return None
+
+    def _compute_midblock_norms(self, midblock):
+        grad_norm = 0.0
+        param_norm = 0.0
+        total_params = 0
+        for parameter in midblock.parameters():
+            if parameter.requires_grad:
+                total_params += parameter.numel()
+                param_norm += parameter.data.norm(2).item() ** 2
+                if parameter.grad is not None:
+                    grad_norm += parameter.grad.norm(2).item() ** 2
+        return grad_norm**0.5, param_norm**0.5, total_params
+
+    def on_pre_optimizer_step(self, args, state, control, model=None, **kwargs):
+        midblock = self._resolve_midblock(model)
+        if midblock is None:
+            return
+        grad_norm, _, _ = self._compute_midblock_norms(midblock)
+        self._last_grad_norm = grad_norm
+
     def on_log(self, args, state, control, model=None, logs=None, **kwargs):
         if model is None or logs is None:
             return
 
-        if hasattr(model, "midblock"):
-            midblock = model.midblock
-            grad_norm = 0.0
-            param_norm = 0.0
-            for parameter in midblock.parameters():
-                if parameter.requires_grad:
-                    param_norm += parameter.data.norm(2).item() ** 2
-                    if parameter.grad is not None:
-                        grad_norm += parameter.grad.norm(2).item() ** 2
+        midblock = self._resolve_midblock(model)
+        if midblock is None:
+            return
 
-            logs["midblock/grad_norm"] = grad_norm**0.5
-            logs["midblock/param_norm"] = param_norm**0.5
-            logs["midblock/total_params"] = sum(
-                parameter.numel() for parameter in midblock.parameters() if parameter.requires_grad
-            )
+        _, param_norm, total_params = self._compute_midblock_norms(midblock)
+        logs["midblock/grad_norm"] = self._last_grad_norm
+        logs["midblock/param_norm"] = param_norm
+        logs["midblock/total_params"] = total_params
 
     def on_train_begin(self, args, state, control, model=None, **kwargs):
         if model is not None and hasattr(model, "trainable_params"):

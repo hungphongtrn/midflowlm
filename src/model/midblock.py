@@ -17,7 +17,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Literal
-import math
 
 from src.model.adapter import ContinuousTimeEmbedding, BoundaryConditioningAdapter
 
@@ -104,33 +103,18 @@ class CausalSelfAttention(nn.Module):
             k = k.repeat_interleave(num_groups, dim=1)
             v = v.repeat_interleave(num_groups, dim=1)
 
-        # Compute attention scores
-        scale = 1.0 / math.sqrt(self.head_dim)
-        attn_scores = (
-            torch.matmul(q, k.transpose(-2, -1)) * scale
-        )  # [batch, heads, seq, seq]
-
-        # Apply causal mask
-        causal_mask = torch.triu(
-            torch.ones(seq_len, seq_len, device=hidden_states.device, dtype=torch.bool),
-            diagonal=1,
-        )
-        attn_scores = attn_scores.masked_fill(
-            causal_mask.unsqueeze(0).unsqueeze(0), float("-inf")
-        )
-
-        # Apply attention mask (for padding)
+        sdpa_mask = None
         if attention_mask is not None:
-            # attention_mask: [batch, seq] -> [batch, 1, 1, seq]
-            mask = attention_mask.unsqueeze(1).unsqueeze(2).to(torch.bool)
-            attn_scores = attn_scores.masked_fill(~mask, float("-inf"))
+            sdpa_mask = attention_mask[:, None, None, :].to(torch.bool)
 
-        # Softmax and dropout
-        attn_weights = F.softmax(attn_scores, dim=-1, dtype=torch.float32).to(q.dtype)
-        attn_weights = self.attn_dropout(attn_weights)
-
-        # Apply attention to values
-        attn_output = torch.matmul(attn_weights, v)  # [batch, heads, seq, head_dim]
+        attn_output = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=sdpa_mask,
+            dropout_p=self.dropout if self.training else 0.0,
+            is_causal=True,
+        )
 
         # Reshape and project
         attn_output = (

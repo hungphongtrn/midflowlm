@@ -238,6 +238,35 @@ class SFTFlowMidblockModel(nn.Module):
         )
         return outputs
 
+    def state_dict(self, *args, **kwargs):
+        """Return a deduplicated state_dict for safetensors compatibility.
+
+        Qwen ties some weights (for example input embeddings and lm_head), and this
+        wrapper also exposes aliases to the same underlying modules. Safetensors
+        rejects duplicate references to the same storage. We keep only the first key
+        per unique tensor storage in the returned state_dict.
+        """
+        raw_state = super().state_dict(*args, **kwargs)
+        deduped_state = {}
+        seen_storages = set()
+
+        for key, tensor in raw_state.items():
+            storage_key = (tensor.untyped_storage().data_ptr(), tensor.storage_offset(), tuple(tensor.size()))
+            if storage_key in seen_storages:
+                continue
+            seen_storages.add(storage_key)
+            deduped_state[key] = tensor
+
+        return deduped_state
+
+    def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs: Optional[Dict] = None):
+        if hasattr(self.qwen, "gradient_checkpointing_enable"):
+            self.qwen.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs)
+
+    def gradient_checkpointing_disable(self):
+        if hasattr(self.qwen, "gradient_checkpointing_disable"):
+            self.qwen.gradient_checkpointing_disable()
+
     @property
     def trainable_params(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
