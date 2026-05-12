@@ -56,6 +56,19 @@ def test_filter_by_token_budget_filters_and_keeps_missing_meta():
     filtered = filter_by_token_budget(ds, max_total_tokens=100)
 
     assert len(filtered) == 2
+    remaining_total_tokens = []
+    for sample in filtered:
+        meta = sample.get("meta")
+        if isinstance(meta, dict) and meta.get("input_tokens") is not None and meta.get("output_tokens") is not None:
+            remaining_total_tokens.append(int(meta["input_tokens"]) + int(meta["output_tokens"]))
+    assert remaining_total_tokens == [60]
+
+
+def _find_subsequence(seq, subseq):
+    for i in range(len(seq) - len(subseq) + 1):
+        if seq[i : i + len(subseq)] == subseq:
+            return i
+    return -1
 
 
 def test_tokenize_reasoning_dataset_outputs_ids_and_masked_labels():
@@ -83,6 +96,41 @@ def test_tokenize_reasoning_dataset_outputs_ids_and_masked_labels():
     assert len(ex["labels"]) == len(ex["input_ids"])
     assert any(lbl == -100 for lbl in ex["labels"])
     assert any(lbl != -100 for lbl in ex["labels"])
+
+
+def test_tokenize_reasoning_dataset_applies_glm_role_mapping_for_labels():
+    from src.data.reasoning_sft import tokenize_reasoning_dataset
+
+    user_text = "USER_ONLY_MARKER"
+    assistant_text = "ASSIST_ONLY_MARKER"
+    ds = Dataset.from_list(
+        [
+            {
+                "conversations": [
+                    {"from": "human", "value": user_text},
+                    {"from": "gpt", "value": assistant_text},
+                ]
+            }
+        ]
+    )
+
+    tok = DummyTokenizer()
+    out = tokenize_reasoning_dataset(ds, tok, max_length=512, num_proc=1)
+    ex = out[0]
+
+    user_ids = [ord(ch) for ch in user_text]
+    assistant_ids = [ord(ch) for ch in assistant_text]
+
+    user_start = _find_subsequence(ex["input_ids"], user_ids)
+    assistant_start = _find_subsequence(ex["input_ids"], assistant_ids)
+
+    assert user_start >= 0
+    assert assistant_start >= 0
+    assert all(lbl == -100 for lbl in ex["labels"][user_start : user_start + len(user_ids)])
+    assert all(
+        lbl != -100
+        for lbl in ex["labels"][assistant_start : assistant_start + len(assistant_ids)]
+    )
 
 
 def test_create_reasoning_sft_datasets_returns_expected_columns():
@@ -128,3 +176,36 @@ def test_create_reasoning_sft_datasets_returns_expected_columns():
     assert len(eval_ds) > 0
     assert set(train_ds.column_names) == {"input_ids", "attention_mask", "labels"}
     assert set(eval_ds.column_names) == {"input_ids", "attention_mask", "labels"}
+
+
+def test_train_val_are_disjoint_by_content():
+    from src.data.reasoning_sft import create_reasoning_sft_datasets
+
+    ds = Dataset.from_list(
+        [
+            {
+                "conversations": [
+                    {"from": "human", "value": f"Q{i}"},
+                    {"from": "gpt", "value": f"A{i}"},
+                ],
+                "meta": {"input_tokens": 5, "output_tokens": 5},
+            }
+            for i in range(20)
+        ]
+    )
+
+    with patch("src.data.reasoning_sft.pack_tokenized_dataset", lambda d, **_: d):
+        train_ds, val_ds = create_reasoning_sft_datasets(
+            ds,
+            DummyTokenizer(),
+            max_length=128,
+            num_proc=1,
+            val_split=0.25,
+            seed=7,
+        )
+
+    assert len(train_ds) + len(val_ds) == len(ds)
+
+    train_rows = {tuple(ex["input_ids"]) for ex in train_ds}
+    val_rows = {tuple(ex["input_ids"]) for ex in val_ds}
+    assert train_rows.isdisjoint(val_rows)
