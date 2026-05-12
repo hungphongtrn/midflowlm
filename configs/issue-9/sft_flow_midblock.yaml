@@ -43,7 +43,7 @@ training:
 
   # Logging
   logging_steps: 10
-  report_to: ["tensorboard"]
+  report_to: ["none"]
 
   # Evaluation
   eval_strategy: "steps"

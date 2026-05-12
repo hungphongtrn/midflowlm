@@ -14,7 +14,7 @@ model:
 
 data:
   processed_dir: "./data/reasoning_sft_smoke"  # Smoke test data from Phase 2
-  max_seq_length: 2048  # Reduced for memory
+  max_seq_length: 1024  # Reduced for 12GB VRAM
 
 training:
   output_dir: "./outputs/issue-9/sft_flow_midblock_3060_smoke"
@@ -33,18 +33,16 @@ training:
   lr_scheduler: "cosine"
   warmup_steps: 10
 
-  save_strategy: "steps"
-  save_steps: 50
-  save_total_limit: 1
+  save_strategy: "no"
 
   logging_steps: 5
-  report_to: ["tensorboard"]
+  report_to: ["none"]
 
   # Skip eval during smoke test (saves memory)
   eval_strategy: "no"
 
   dataloader_num_workers: 1
-  gradient_checkpointing: true  # Enable for 12GB safety
+  gradient_checkpointing: false  # No need for BS=1 smoke test
   dataloader_drop_last: false
   dataloader_pin_memory: true
 

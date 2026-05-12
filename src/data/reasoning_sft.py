@@ -127,7 +127,9 @@ def create_reasoning_sft_datasets(
         eval_raw, tokenizer, max_length=max_length, num_proc=num_proc
     )
 
-    train_packed = pack_tokenized_dataset(train_tok, max_seq_length=max_length)
+    pack_cols = [c for c in ("input_ids", "labels") if c in train_tok.column_names]
+    train_for_pack = train_tok.select_columns(pack_cols)
+    train_packed = pack_tokenized_dataset(train_for_pack, max_seq_length=max_length)
 
     def _with_attention_mask(example: dict[str, Any]) -> dict[str, list[int]]:
         input_ids = example["input_ids"]

@@ -56,7 +56,7 @@ def main():
     if torch.cuda.is_available():
         device = torch.device("cuda")
         logger.info(f"Using GPU: {torch.cuda.get_device_name()}")
-        logger.info(f"VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+        logger.info(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     else:
         device = torch.device("cpu")
         logger.warning("No GPU found, using CPU (training will be very slow)")
@@ -139,7 +139,7 @@ def main():
         save_strategy=training_cfg.get("save_strategy", "steps"),
         save_steps=training_cfg.get("save_steps", 500),
         save_total_limit=training_cfg.get("save_total_limit", 2),
-        load_best_model_at_end=True,
+        load_best_model_at_end=training_cfg.get("eval_strategy", "steps") != "no",
         # Logging
         logging_dir=os.path.join(output_dir, "logs"),
         logging_strategy="steps",
@@ -172,7 +172,6 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
-        tokenizer=tokenizer,
         callbacks=[MidblockMetricsCallback()],
     )
 
@@ -201,7 +200,7 @@ def main():
     logger.info("=" * 60)
     logger.info(f"  Total steps:       {train_result.global_step}")
     logger.info(f"  Training loss:     {train_result.training_loss:.4f}")
-    logger.info(f"  Total FLOPs est.:  {train_result.total_flos:.2e}")
+    logger.info(f"  Total FLOPs est.:  {getattr(train_result, 'total_flos', 0):.2e}")
     logger.info(f"  Output directory:  {output_dir}")
 
 
