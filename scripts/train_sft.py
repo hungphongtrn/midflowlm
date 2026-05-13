@@ -23,6 +23,7 @@ from transformers import (
     set_seed,
 )
 from datasets import load_from_disk
+from huggingface_hub import hf_hub_download
 from src.data.reasoning_sft import create_reasoning_sft_datasets_from_config
 
 from src.model.sft_flow_midblock import SFTFlowMidblockModel
@@ -38,6 +39,50 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _resolve_hf_token(args_token: str | None) -> str | None:
+    """Resolve HF token from CLI arg, env vars, or huggingface-cli login."""
+    token = (
+        args_token
+        or os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    )
+    if token:
+        return token
+    try:
+        from huggingface_hub._login import get_token
+
+        return get_token()
+    except Exception:
+        return None
+
+
+def _maybe_download_checkpoint(checkpoint_cfg: dict, token: str | None) -> str:
+    """Return local checkpoint path, downloading from HF Hub if needed."""
+    local_path = checkpoint_cfg.get("path", "models/p3_d3_mix_c/checkpoint.pth")
+    if os.path.exists(local_path):
+        logger.info("Checkpoint found locally: %s", local_path)
+        return local_path
+
+    remote_repo = checkpoint_cfg.get("remote_repo")
+    remote_filename = checkpoint_cfg.get("remote_filename")
+    if not remote_repo or not remote_filename:
+        raise FileNotFoundError(
+            f"Checkpoint not found at {local_path} and no remote config provided."
+        )
+
+    logger.info("Downloading checkpoint from %s/%s ...", remote_repo, remote_filename)
+    local_dir = os.path.dirname(local_path) or "."
+    local_path = hf_hub_download(
+        repo_id=remote_repo,
+        filename=remote_filename,
+        local_dir=local_dir,
+        local_dir_use_symlinks=False,
+        token=token,
+    )
+    logger.info("Checkpoint downloaded to %s", local_path)
+    return local_path
 
 
 def load_config(config_path: str) -> dict:
