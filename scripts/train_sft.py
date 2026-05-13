@@ -301,6 +301,10 @@ def main():
         resume_from_checkpoint=training_args.resume_from_checkpoint,
     )
 
+    if training_cfg.get("push_to_hub") and hf_token and training_cfg.get("hub_strategy", "end") == "end":
+        logger.info("Pushing final trainer artifacts to HF Hub (hub_strategy=end)")
+        trainer.push_to_hub(commit_message="End of training")
+
     # Push experiment_info.json to HF Hub
     if training_cfg.get("push_to_hub") and hf_token:
         from huggingface_hub import upload_file
