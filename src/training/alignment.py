@@ -15,7 +15,6 @@ The aligned targets are returned in a format directly consumable by loss modules
 from enum import Enum, auto
 from typing import List, Tuple, Optional, Union, Dict, Any
 import torch
-import torch.nn.functional as F
 
 
 class AlignmentPolicy(Enum):

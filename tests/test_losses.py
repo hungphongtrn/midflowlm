@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 import yaml
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 @pytest.fixture

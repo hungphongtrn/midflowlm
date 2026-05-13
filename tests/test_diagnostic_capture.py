@@ -1,5 +1,3 @@
-import json
-import pytest
 import torch
 from src.diagnostic.traces import FlowTrace, DecoderTrace
 from src.diagnostic.probe import ProbeExample

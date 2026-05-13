@@ -179,8 +179,8 @@ class TeacherCacheWriter:
             json.dump(metadata.to_dict(), f, indent=2)
 
         logger.info(f"Wrote metadata to {metadata_path}")
-        logger.info(f"  Target type: velocity")
-        logger.info(f"  Training state rule: h_t = h_start + t * velocity_target")
+        logger.info("  Target type: velocity")
+        logger.info("  Training state rule: h_t = h_start + t * velocity_target")
 
     def _get_shard_path(self, shard_idx: int, num_shards: int) -> Path:
         """Get the path for a shard file.

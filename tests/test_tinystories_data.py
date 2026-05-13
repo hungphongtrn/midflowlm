@@ -1,6 +1,5 @@
 """Tests for TinyStories dataset loading and tokenization."""
 
-import pytest
 import torch
 from unittest.mock import MagicMock, patch
 

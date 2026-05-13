@@ -1,6 +1,5 @@
-import pytest
 import torch
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from src.training.trainer import Trainer
 
 

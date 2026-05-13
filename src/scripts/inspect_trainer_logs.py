@@ -77,7 +77,7 @@ def analyze_log_file(log_path: Path):
 
     duplicates = detect_duplicate_steps(step_entries)
     if duplicates:
-        print(f"\nWARNING: Duplicate validation/checkpoint entries found:")
+        print("\nWARNING: Duplicate validation/checkpoint entries found:")
         for step, count in duplicates.items():
             print(f"  Step {step}: {count} validation/checkpoint events")
     else:

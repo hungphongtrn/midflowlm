@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.training.alignment import TrajectoryAligner, AlignmentPolicy
+from src.training.alignment import TrajectoryAligner
 
 
 @dataclass

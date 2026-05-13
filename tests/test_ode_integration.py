@@ -105,7 +105,6 @@ class TestODESolverIntegration:
     )
     def test_odeint_can_solve_with_midblock_vector_field(self):
         """Test that torchdiffeq.odeint works with our vector field wrapper."""
-        from src.model.ode import MidblockVectorField, build_solver_options
         from torchdiffeq import odeint
 
         # Create a simple vector field that returns constant velocity

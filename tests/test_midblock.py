@@ -13,7 +13,6 @@ These tests verify:
 
 import pytest
 import torch
-import torch.nn as nn
 import yaml
 from pathlib import Path
 import tempfile

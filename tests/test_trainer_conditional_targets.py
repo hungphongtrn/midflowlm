@@ -1,6 +1,5 @@
-import pytest
 import torch
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from src.training.trainer import Trainer
 
 

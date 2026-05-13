@@ -14,8 +14,6 @@ Task 4 contract tests:
 import pytest
 import yaml
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-from dataclasses import dataclass
 
 
 class TestTeacherStateModeResolution:

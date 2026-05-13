@@ -5,7 +5,7 @@ Provides utilities to load and apply hardware profiles from JSON artifacts.
 
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 
 def load_hardware_profile(profile_path: str) -> Dict[str, Any]:

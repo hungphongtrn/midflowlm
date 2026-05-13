@@ -20,12 +20,12 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 from types import SimpleNamespace
 
 import torch
 import yaml
-from transformers import AutoTokenizer, PreTrainedTokenizer
+from transformers import AutoTokenizer
 
 # Force unbuffered output for live logging
 os.environ["PYTHONUNBUFFERED"] = "1"
@@ -380,7 +380,7 @@ def main():
         warmstart_path = find_checkpoint_path(init_from_checkpoint)
         if warmstart_path:
             logger.info("=" * 60)
-            logger.info(f"WARM-STARTING FROM CHECKPOINT (fresh optimizer/scheduler)")
+            logger.info("WARM-STARTING FROM CHECKPOINT (fresh optimizer/scheduler)")
             logger.info(f"Loading model weights from: {warmstart_path}")
             logger.info("Optimizer, scheduler, and global_step will be FRESH")
             logger.info("=" * 60)
@@ -446,7 +446,7 @@ def main():
 
     if checkpoint_path:
         logger.info("=" * 60)
-        logger.info(f"RESUMING TRAINING FROM CHECKPOINT")
+        logger.info("RESUMING TRAINING FROM CHECKPOINT")
         logger.info(f"Checkpoint path: {checkpoint_path}")
         logger.info(
             f"Previous step: {trainer.global_step}, epoch: {trainer.current_epoch}"

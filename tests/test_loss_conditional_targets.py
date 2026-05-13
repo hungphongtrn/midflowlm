@@ -1,4 +1,3 @@
-import pytest
 import torch
 from unittest.mock import patch, MagicMock
 from src.model.student_qwen import FrozenQwenStudent

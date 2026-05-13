@@ -14,7 +14,6 @@ import torch
 import torch.nn as nn
 from typing import Optional, Dict, Any, Union
 from transformers import AutoModelForCausalLM, AutoConfig
-from dataclasses import dataclass
 
 from src.model.midblock import IterativeMidblock
 from src.model.ode import MidblockVectorField, build_solver_options

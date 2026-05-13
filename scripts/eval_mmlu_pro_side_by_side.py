@@ -90,7 +90,6 @@ import logging
 import random
 import re
 import sys
-import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
@@ -923,7 +922,7 @@ Examples:
         logger.info("Low memory mode: Enabled (for 13GB VRAM)")
     if args.skip_base:
         logger.info("Base model: Using existing results")
-    logger.info(f"Batch size: 1 (processing single samples)")
+    logger.info("Batch size: 1 (processing single samples)")
     logger.info(f"Models: {list(models.keys())}")
     logger.info(f"T values: {args.num_steps}")
     logger.info(f"Max new tokens: {args.max_new_tokens}")

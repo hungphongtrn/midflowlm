@@ -9,7 +9,6 @@ These tests verify:
 
 import pytest
 import torch
-import torch.nn as nn
 
 
 def test_continuous_time_embedding_accepts_fractional_t():

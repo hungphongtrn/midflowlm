@@ -5,7 +5,7 @@ import argparse
 import csv
 import json
 import logging
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Any
 

@@ -1,4 +1,3 @@
-import pytest
 import torch
 from src.model.student_qwen import FrozenQwenStudent
 

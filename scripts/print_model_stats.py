@@ -82,9 +82,9 @@ def print_model_stats(config: dict, device: str = "cpu") -> None:
     print("Iterative Refinement Schedule:")
     print(f"  Maximum T (max_steps_T): {max_steps_T}")
     print(f"  Training T values: {train_T_values}")
-    print(f"  T < depth(span) regime: compression policy")
-    print(f"  T = depth(span) regime: exact layerwise matching")
-    print(f"  T > depth(span) regime: expansion/interpolation policy")
+    print("  T < depth(span) regime: compression policy")
+    print("  T = depth(span) regime: exact layerwise matching")
+    print("  T > depth(span) regime: expansion/interpolation policy")
     print()
 
     # Load model and get parameter counts
@@ -135,8 +135,8 @@ def print_model_stats(config: dict, device: str = "cpu") -> None:
         # Training implications
         print("Training Implications:")
         print(f"  Only ~{trainable_pct:.2f}% of parameters are trainable")
-        print(f"  Gradient checkpointing recommended for large batch sizes")
-        print(f"  Teacher cache required before training")
+        print("  Gradient checkpointing recommended for large batch sizes")
+        print("  Teacher cache required before training")
         print()
 
         # Reference values for Qwen3.5-0.8B

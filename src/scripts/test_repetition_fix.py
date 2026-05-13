@@ -58,7 +58,7 @@ def test_repetition_fix():
         "wondered what it was doing"
     )
 
-    print(f"\nValidation:")
+    print("\nValidation:")
     print(f"  Greedy - phrase repeats: {greedy_repeats}")
     print(f"  Sampling - phrase repeats: {sampling_repeats}")
 

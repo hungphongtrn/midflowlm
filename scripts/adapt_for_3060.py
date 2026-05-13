@@ -8,7 +8,6 @@ Usage:
 """
 
 import yaml
-import os
 from pathlib import Path
 
 CONFIGS_DIR = Path("configs/v0_1_matrix")
@@ -71,8 +70,8 @@ def main():
             # Header
             f.write(f"# {adapted['experiment_name']}\n")
             f.write(f"# 3060-adapted version of {config_path.name}\n")
-            f.write(f"# Changes: batch_size=1, grad_accum=16, num_workers=0\n")
-            f.write(f"#\n\n")
+            f.write("# Changes: batch_size=1, grad_accum=16, num_workers=0\n")
+            f.write("#\n\n")
             yaml.dump(adapted, f, default_flow_style=False, sort_keys=False)
 
         print(f"  ✓ {output_path.name}")

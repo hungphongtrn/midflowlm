@@ -1,4 +1,3 @@
-import pytest
 from src.diagnostic.analysis import FlowAnalysisResult, DecoderAnalysisResult
 
 

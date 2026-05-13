@@ -81,7 +81,6 @@ from typing import Dict, List, Optional, Any, Tuple
 import torch
 import yaml
 from datasets import load_dataset
-from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -567,14 +566,14 @@ def evaluate_model_on_mmlu_pro(
     correct_samples = [r for r in results if r.is_correct][:3]
 
     if incorrect_samples:
-        logger.info(f"\n  Sample INCORRECT predictions:")
+        logger.info("\n  Sample INCORRECT predictions:")
         for r in incorrect_samples:
             logger.info(f"    Q: {r.question[:60]}...")
             logger.info(f"    Expected: {r.correct_answer}, Predicted: {r.predicted_answer}")
             logger.info(f"    Raw output: {r.raw_output_text[:100]}...")
 
     if correct_samples:
-        logger.info(f"\n  Sample CORRECT predictions:")
+        logger.info("\n  Sample CORRECT predictions:")
         for r in correct_samples:
             logger.info(f"    Q: {r.question[:60]}...")
             logger.info(f"    Answer: {r.correct_answer}")
@@ -914,7 +913,7 @@ Examples:
     # Evaluate student model if checkpoint provided
     if args.checkpoint:
         logger.info(f"\n{'=' * 60}")
-        logger.info(f"Evaluating student model from checkpoint")
+        logger.info("Evaluating student model from checkpoint")
         logger.info(f"Checkpoint: {args.checkpoint}")
         logger.info(f"Experiment ID: {args.experiment_id or 'Not set'}")
         logger.info(f"Evaluating T values: {num_steps_list}")
@@ -950,7 +949,7 @@ Examples:
     # Also evaluate the teacher (original model) if no baseline specified and not skipped
     if not args.baseline and not args.skip_teacher:
         logger.info(f"\n{'=' * 60}")
-        logger.info(f"Evaluating teacher model (original Qwen)")
+        logger.info("Evaluating teacher model (original Qwen)")
         logger.info("=" * 60)
 
         teacher_model = FrozenQwenStudent(

@@ -24,7 +24,7 @@ import random
 import torch
 import torch.nn as nn
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, Optional, Union, Any
 from collections import defaultdict
 
 # Optional wandb import
@@ -380,14 +380,14 @@ class Trainer:
         if attention_mask is not None:
             attention_mask = attention_mask.to(self.device)
 
-        logger.debug(f"Extracting teacher targets for batch...")
+        logger.debug("Extracting teacher targets for batch...")
         loss_flags = self._get_loss_flags()
         teacher_targets = self.model.extract_teacher_targets(
             input_ids=input_ids,
             attention_mask=attention_mask,
             **loss_flags,
         )
-        logger.debug(f"Teacher targets extracted successfully")
+        logger.debug("Teacher targets extracted successfully")
         h_start = teacher_targets["h_start"]
         h_target = teacher_targets["h_target"]
         velocity_target = teacher_targets.get("velocity_target")

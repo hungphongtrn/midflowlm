@@ -10,10 +10,9 @@ Runtime behavior (Tasks 5/6) will route through these helpers:
 - Trainer computes or consumes teacher states per mode
 """
 
-from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from src.training.data import validate_cache_compatibility as _validate_cache_compat
 

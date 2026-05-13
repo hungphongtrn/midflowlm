@@ -394,7 +394,7 @@ def build_cache_with_split(
     train_writer.write_metadata(num_samples=train_count)
     val_writer.write_metadata(num_samples=val_count)
 
-    logger.info(f"Cache build complete:")
+    logger.info("Cache build complete:")
     logger.info(f"  Train: {train_count} samples -> {train_cache_dir}")
     logger.info(f"  Val: {val_count} samples -> {val_cache_dir}")
 
@@ -490,7 +490,7 @@ def verify_cache(
 
     # Load metadata
     metadata = load_metadata(cache_dir)
-    logger.info(f"Cache metadata:")
+    logger.info("Cache metadata:")
     logger.info(f"  Model: {metadata.model_name}")
     logger.info(f"  Span: layers {metadata.start_layer}-{metadata.end_layer}")
     logger.info(f"  Total samples: {metadata.num_samples}")
@@ -526,10 +526,10 @@ def verify_cache(
                 data["velocity_target"], expected_velocity, rtol=1e-5, atol=1e-6
             ):
                 logger.info(
-                    f"  ✓ velocity_target correctly computed: h_target - h_start"
+                    "  ✓ velocity_target correctly computed: h_target - h_start"
                 )
             else:
-                logger.warning(f"  ✗ velocity_target mismatch with h_target - h_start!")
+                logger.warning("  ✗ velocity_target mismatch with h_target - h_start!")
 
         except Exception as e:
             logger.error(f"Error verifying sample {i}: {e}")

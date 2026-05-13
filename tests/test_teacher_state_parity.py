@@ -10,7 +10,6 @@ Task 7: Add parity checks and mode-specific smoke commands
 import pytest
 import torch
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 
 
 class TestLiveVsCachedParity:
@@ -144,7 +143,7 @@ class TestTrainerOnlineModeParity:
         """
         from src.training.trainer import Trainer
         import torch.nn as nn
-        from unittest.mock import MagicMock, Mock, patch
+        from unittest.mock import Mock
 
         mock_model = MagicMock()
         endpoint_hidden = torch.randn(2, 16, 128, requires_grad=True)
@@ -215,7 +214,7 @@ class TestTrainerOnlineModeParity:
         """
         from src.training.trainer import Trainer
         import torch.nn as nn
-        from unittest.mock import MagicMock, Mock, patch
+        from unittest.mock import Mock
 
         mock_model = MagicMock()
         endpoint_hidden = torch.randn(2, 16, 128, requires_grad=True)

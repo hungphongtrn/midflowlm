@@ -3,7 +3,7 @@
 from typing import Dict, Optional, Any
 import torch
 from torch.utils.data import DataLoader
-from datasets import load_dataset, DatasetDict
+from datasets import load_dataset
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
 

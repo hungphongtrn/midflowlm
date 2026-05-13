@@ -1,12 +1,10 @@
 """Deterministic trace runner for diagnostic probing."""
-import json
 import random
 import torch
 import numpy as np
 import yaml
-from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List, Tuple
-from pathlib import Path
+from dataclasses import dataclass
+from typing import Dict, Any, List, Tuple
 
 from src.diagnostic.probe import ProbeSet, ProbeExample
 from transformers import AutoTokenizer

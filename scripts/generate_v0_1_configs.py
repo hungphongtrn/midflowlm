@@ -8,7 +8,6 @@ Usage:
 This creates all P1/P2/P3/P4 experiment configs in configs/v0_1_matrix/
 """
 
-import os
 import yaml
 import multiprocessing
 from pathlib import Path

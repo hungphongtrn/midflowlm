@@ -1,8 +1,6 @@
 import torch
 import numpy as np
-import math
 from typing import List, Dict, Optional
-from pathlib import Path
 
 from src.diagnostic.probe import ProbeExample
 from src.diagnostic.traces import FlowTrace, DecoderTrace

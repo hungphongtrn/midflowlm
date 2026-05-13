@@ -16,7 +16,6 @@ import torch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.eval.mmlu_pro_behavior import (
-    PromptBehavior,
     create_mmlu_pro_prompt,
     create_tokenizer,
     generate_behavior_completion,

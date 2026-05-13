@@ -15,8 +15,7 @@ import json
 import tempfile
 import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch, mock_open
-import numpy as np
+from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture

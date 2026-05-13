@@ -1,6 +1,6 @@
 import json
 import pytest
-from src.diagnostic.probe import ProbeExample, ProbeSet, select_probes
+from src.diagnostic.probe import ProbeSet, select_probes
 
 
 @pytest.fixture

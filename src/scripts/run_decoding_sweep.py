@@ -8,7 +8,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.eval.text_checkpoint_sweep import load_texts, run_text_sweep
+from src.eval.text_checkpoint_sweep import run_text_sweep
 
 
 def main():

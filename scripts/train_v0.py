@@ -635,7 +635,6 @@ def _create_online_dataloaders(config: dict) -> dict:
     Returns:
         Dictionary with 'train' and 'val' dataloaders
     """
-    from transformers import AutoTokenizer
 
     data_config = config.get("data", {})
     model_config = config.get("model", {})

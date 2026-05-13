@@ -192,7 +192,7 @@ def test_config(config_path, microbatch_size, gradient_accumulation, max_steps=5
             else 0
         )
 
-        print(f"✓ SUCCESS!")
+        print("✓ SUCCESS!")
         print(f"  Peak VRAM: {peak_vram:.2f} GB")
         print(f"  Step time: {avg_step_time:.3f}s")
         print(f"  Tokens/sec: {tokens_per_sec:.1f}")

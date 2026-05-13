@@ -12,7 +12,6 @@ Usage:
 """
 
 import argparse
-import yaml
 import sys
 import traceback
 from pathlib import Path

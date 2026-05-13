@@ -15,7 +15,6 @@ import tempfile
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch, Mock
-import numpy as np
 
 
 def test_format_train_batch_log_includes_kl_loss():
@@ -904,11 +903,10 @@ def test_train_script_dataloader_validates_cache_compatibility():
     """
     import sys
     from pathlib import Path
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock
     import src.training.data as data_module
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-    import train_v0
     from train_v0 import create_dataloaders
 
     mock_metadata = MagicMock()
@@ -945,11 +943,10 @@ def test_train_script_dataloader_catches_missing_logits_when_kl_weight_positive(
     """
     import sys
     from pathlib import Path
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock
     import src.training.data as data_module
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-    import train_v0
     from train_v0 import create_dataloaders
 
     mock_metadata = MagicMock()
@@ -979,7 +976,7 @@ def test_teacher_state_offline_cache_routes_to_cache_dataloader():
     When teacher_state.mode is 'offline_cache', the router should call
     create_cache_dataloader (not get_experiment_dataloaders).
     """
-    from unittest.mock import MagicMock, patch, Mock
+    from unittest.mock import MagicMock
     import sys
     from pathlib import Path
 
@@ -1016,7 +1013,7 @@ def test_teacher_state_online_no_cache_routes_to_token_dataset():
     get_experiment_dataloaders (not create_cache_dataloader).
     Currently this raises NotImplementedError - this test should FAIL until routing is implemented.
     """
-    from unittest.mock import MagicMock, patch, Mock
+    from unittest.mock import MagicMock
     import sys
     from pathlib import Path
 
@@ -1077,7 +1074,7 @@ def test_teacher_state_online_write_through_routes_to_token_dataset():
     get_experiment_dataloaders (not create_cache_dataloader).
     Currently this raises NotImplementedError - this test should FAIL until routing is implemented.
     """
-    from unittest.mock import MagicMock, patch, Mock
+    from unittest.mock import MagicMock
     import sys
     from pathlib import Path
 
@@ -1214,7 +1211,7 @@ class TestTrainerTeacherStateModes:
         """
         from src.training.trainer import Trainer
         import torch.nn as nn
-        from unittest.mock import MagicMock, Mock, patch
+        from unittest.mock import MagicMock, Mock
 
         mock_model = MagicMock()
         endpoint_hidden = torch.randn(2, 16, 128, requires_grad=True)
@@ -1288,7 +1285,7 @@ class TestTrainerTeacherStateModes:
         """
         from src.training.trainer import Trainer
         import torch.nn as nn
-        from unittest.mock import MagicMock, Mock, patch
+        from unittest.mock import MagicMock, Mock
 
         mock_model = MagicMock()
         endpoint_hidden = torch.randn(2, 16, 128, requires_grad=True)

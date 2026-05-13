@@ -11,7 +11,6 @@ These tests verify:
 
 import pytest
 import torch
-import torch.nn as nn
 from pathlib import Path
 import yaml
 
@@ -538,7 +537,6 @@ class TestTextSweepSolverMetadata:
 
     def test_payload_includes_solver_metadata(self):
         """Test that payload includes solver_method when calling run_text_sweep."""
-        from src.eval.text_checkpoint_sweep import run_text_sweep
 
         payload = {
             "config_path": "test",

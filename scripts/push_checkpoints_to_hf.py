@@ -61,7 +61,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional, Union
 
 # Add src to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -386,7 +386,7 @@ This is a trained MidFlowLM student model checkpoint from Phase 1 of the v0.1 ex
 
 """
 
-    readme += f"""## Usage
+    readme += """## Usage
 
 ### Load for Inference
 
@@ -422,12 +422,12 @@ See the [MidFlowLM repository](https://github.com/hungphongtrn/midflowlm) for ev
 ## Citation
 
 ```bibtex
-@software{{midflowlm,
-  author = {{Tran, Hung Phong}},
-  title = {{MidFlowLM: Flow-Based Language Model Distillation}},
-  year = {{2025}},
-  url = {{https://github.com/hungphongtrn/midflowlm}}
-}}
+@software{midflowlm,
+  author = {Tran, Hung Phong},
+  title = {MidFlowLM: Flow-Based Language Model Distillation},
+  year = {2025},
+  url = {https://github.com/hungphongtrn/midflowlm}
+}
 ```
 
 ## License
@@ -501,7 +501,7 @@ def push_checkpoint_to_hub(
             token=token,
             repo_type="model",
         )
-        logger.info(f"  ✓ checkpoint.pth uploaded")
+        logger.info("  ✓ checkpoint.pth uploaded")
 
         # Upload config
         if config_path.exists():
@@ -512,7 +512,7 @@ def push_checkpoint_to_hub(
                 token=token,
                 repo_type="model",
             )
-            logger.info(f"  ✓ config.yaml uploaded")
+            logger.info("  ✓ config.yaml uploaded")
 
         # Create and upload experiment info
         experiment_info = {
@@ -539,7 +539,7 @@ def push_checkpoint_to_hub(
             token=token,
             repo_type="model",
         )
-        logger.info(f"  ✓ experiment_info.json uploaded")
+        logger.info("  ✓ experiment_info.json uploaded")
 
         # Create and upload README
         readme = create_model_card(experiment_key, config_data, checkpoint_info)
@@ -554,7 +554,7 @@ def push_checkpoint_to_hub(
             token=token,
             repo_type="model",
         )
-        logger.info(f"  ✓ README.md uploaded")
+        logger.info("  ✓ README.md uploaded")
 
         logger.info(f"✅ Successfully pushed {exp['name']} to {repo_id}/{subdir}")
         return True
@@ -626,12 +626,12 @@ def download_checkpoint_locally(
         if os.path.exists(checkpoint_real_path) and not os.path.exists(best_ckpt_path):
             try:
                 os.symlink("checkpoint.pth", best_ckpt_path)
-                logger.info(f"  ✓ Created best.ckpt -> checkpoint.pth symlink")
+                logger.info("  ✓ Created best.ckpt -> checkpoint.pth symlink")
             except OSError:
                 # Fallback: copy the file if symlinks aren't supported (Windows)
                 import shutil
                 shutil.copy2(checkpoint_real_path, best_ckpt_path)
-                logger.info(f"  ✓ Created best.ckpt (copied from checkpoint.pth)")
+                logger.info("  ✓ Created best.ckpt (copied from checkpoint.pth)")
 
         logger.info(f"✅ Successfully downloaded {exp['name']} to {local_dir}/{subdir}")
         return True
@@ -866,14 +866,14 @@ Authentication Methods (checked in order):
         logger.info(f"  ✅ Uploaded:   {success_count}/{total}")
         logger.info(f"  ⏳ Skipped:    {skipped_count}/{total} (training incomplete)")
         logger.info(f"  ❌ Failed:     {failed_count}/{total}")
-        logger.info(f"  ─────────────────────────")
+        logger.info("  ─────────────────────────")
         logger.info(f"  Total:        {total}")
         logger.info(f"{'=' * 60}")
 
         if success_count == total:
             logger.info("\n✅ All checkpoints pushed successfully!")
             logger.info("\nTo download on your local machine:")
-            logger.info(f"  export HF_TOKEN=your_token_here")
+            logger.info("  export HF_TOKEN=your_token_here")
             for exp_key in experiments_to_process:
                 subdir = EXPERIMENTS[exp_key]["subdir"]
                 logger.info(f"  uv run python scripts/push_checkpoints_to_hf.py --download --{exp_key.replace('_', '-')} --local-dir ./models")

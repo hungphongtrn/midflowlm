@@ -22,7 +22,7 @@ import os
 import sys
 import multiprocessing
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 from types import SimpleNamespace
 
 import torch
@@ -266,7 +266,7 @@ def try_microbatch(
             "success": True,
         }
 
-    except torch.cuda.OutOfMemoryError as e:
+    except torch.cuda.OutOfMemoryError:
         print(
             f"OOM at microbatch_size={microbatch_size}, grad_accum={gradient_accumulation}"
         )
@@ -312,7 +312,7 @@ def find_optimal_profile(
         )
 
         if result is None:
-            print(f"  Failed (OOM or error)")
+            print("  Failed (OOM or error)")
             break
 
         print(f"  Peak VRAM: {result['peak_vram_gb']:.2f} GB")
@@ -321,9 +321,9 @@ def find_optimal_profile(
 
         if result["peak_vram_gb"] <= vram_limit_gb:
             stable_microbatches.append((microbatch, result))
-            print(f"  ✓ Stable")
+            print("  ✓ Stable")
         else:
-            print(f"  ✗ Over limit")
+            print("  ✗ Over limit")
             break
 
     if not stable_microbatches:
@@ -347,7 +347,7 @@ def find_optimal_profile(
     )
 
     # Phase 3: Verify the final profile
-    print(f"\nPhase 3: Verifying final profile...")
+    print("\nPhase 3: Verifying final profile...")
     final_result = try_microbatch(
         config, best_microbatch, gradient_accumulation, max_steps=5
     )
@@ -361,7 +361,7 @@ def find_optimal_profile(
     print(f"  Tokens/sec: {final_result['tokens_per_sec']:.1f}")
 
     if final_result["peak_vram_gb"] > vram_limit_gb:
-        print(f"  WARNING: Peak VRAM exceeds limit!")
+        print("  WARNING: Peak VRAM exceeds limit!")
         # Try with smaller microbatch
         for microbatch in range(best_microbatch - 1, 0, -1):
             gradient_accumulation = max(1, target_effective_batch_size // microbatch)

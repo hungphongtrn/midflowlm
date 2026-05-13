@@ -1,10 +1,8 @@
 """Tests for diagnostic runner - TraceRecord serialization and deterministic behavior."""
 import json
 import random
-import pytest
 import torch
 import numpy as np
-from pathlib import Path
 
 from src.diagnostic.runner import TraceRecord, set_deterministic
 
@@ -181,7 +179,7 @@ class TestDeterministicReproducibility:
     
     def test_deterministic_is_reproducible(self):
         """Same seed + same T should yield identical TraceRecord."""
-        from src.diagnostic.runner import DeterministicTraceRunner, TraceRecord
+        from src.diagnostic.runner import DeterministicTraceRunner
         from src.diagnostic.probe import ProbeExample
         
         # Create mock model that produces deterministic output based on global state
@@ -238,7 +236,7 @@ class TestDeterministicReproducibility:
     
     def test_T_changes_hidden_states(self):
         """T=1 vs T=8 should produce different endpoint_hidden norms."""
-        from src.diagnostic.runner import DeterministicTraceRunner, TraceRecord
+        from src.diagnostic.runner import DeterministicTraceRunner
         from src.diagnostic.probe import ProbeExample
         
         # Create mock model with T-dependent output

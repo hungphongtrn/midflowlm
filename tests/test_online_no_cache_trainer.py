@@ -9,7 +9,6 @@ Tests verify:
 6. No branching in base Trainer from this path
 """
 
-import pytest
 import torch
 import torch.nn as nn
 import tempfile
@@ -878,7 +877,6 @@ def test_global_step_increments_only_at_optimizer_boundary():
 def test_fit_console_logs_only_at_optimizer_step_boundary():
     """fit() console logging should only occur after optimizer steps complete, not during accumulation."""
     from src.training.online_no_cache_trainer import OnlineNoCacheTrainer, logger
-    import logging
 
     class DummyStudent(nn.Module):
         def __init__(self):

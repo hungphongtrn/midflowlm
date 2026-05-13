@@ -9,7 +9,6 @@ Changes:
 """
 
 import yaml
-import os
 from pathlib import Path
 
 SOURCE_DIR = Path("configs/v0_1_matrix")
@@ -67,8 +66,8 @@ def adapt_config(source_path: Path, target_path: Path):
     lines = [
         f"# {config['experiment_name']}",
         f"# 3090-adapted version of {orig_name}.yaml",
-        f"# Changes: batch_size=2, grad_accum=8, num_workers=2",
-        f"#",
+        "# Changes: batch_size=2, grad_accum=8, num_workers=2",
+        "#",
         "",
     ]
 

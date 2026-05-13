@@ -3,7 +3,6 @@
 Reads AnalysisResult dataclasses and writes a self-contained markdown report.
 """
 
-from src.diagnostic.analysis import FlowAnalysisResult, DecoderAnalysisResult
 
 
 def _verdict_q1(flow):

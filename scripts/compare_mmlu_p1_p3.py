@@ -35,9 +35,8 @@ import json
 import logging
 import subprocess
 import sys
-from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -584,7 +583,7 @@ def create_comprehensive_analysis(
                 logger.info(f"  {ckpt}: +{comp['improvements']['count']} / -{comp['degradations']['count']} "
                           f"(net: {comp['net_improvement']:+d})")
     
-    logger.info(f"\nOverlap Analysis:")
+    logger.info("\nOverlap Analysis:")
     logger.info(f"  All models correct: {analysis['overlap_analysis']['all_correct']['count']} "
               f"({analysis['overlap_analysis']['all_correct']['percentage']:.1f}%)")
     logger.info(f"  All models wrong: {analysis['overlap_analysis']['all_wrong']['count']} "
@@ -592,7 +591,7 @@ def create_comprehensive_analysis(
     logger.info(f"  Mixed (some correct): {analysis['overlap_analysis']['mixed']['count']} "
               f"({analysis['overlap_analysis']['mixed']['percentage']:.1f}%)")
     
-    logger.info(f"\nBest Performers:")
+    logger.info("\nBest Performers:")
     for i, perf in enumerate(analysis["best_performers"]["top_3"], 1):
         logger.info(f"  {i}. {perf['checkpoint']}: {perf['accuracy']:.2%}")
     
@@ -838,18 +837,18 @@ Examples:
         logger.info("\n" + "=" * 60)
         logger.info("EVALUATION COMPLETE")
         logger.info("=" * 60)
-        logger.info(f"\nOutput files:")
+        logger.info("\nOutput files:")
         logger.info(f"  Summary CSV:     {args.results_dir}/mmlu_pro_p1_p3_summary.csv")
         logger.info(f"  Per-question CSV: {per_question_path}")
         logger.info(f"  Analysis JSON:   {analysis_path}")
-        logger.info(f"\nTo view results:")
-        logger.info(f"  # Summary table:")
+        logger.info("\nTo view results:")
+        logger.info("  # Summary table:")
         logger.info(f"  cat {args.results_dir}/mmlu_pro_p1_p3_summary.csv | column -t -s, | less -S")
-        logger.info(f"\n  # Per-question comparison:")
+        logger.info("\n  # Per-question comparison:")
         logger.info(f"  cat {per_question_path} | column -t -s, | less -S")
-        logger.info(f"\n  # JSON analysis (pretty print):")
+        logger.info("\n  # JSON analysis (pretty print):")
         logger.info(f"  python -m json.tool {analysis_path} | less")
-        logger.info(f"\n  # Extract specific analysis:")
+        logger.info("\n  # Extract specific analysis:")
         cmd_example = f'  python -c \'import json; d=json.load(open("{analysis_path}")); print(json.dumps(d["baseline_comparison"], indent=2))\''
         logger.info(cmd_example)
     else:

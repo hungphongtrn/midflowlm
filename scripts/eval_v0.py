@@ -47,11 +47,7 @@ from src.eval.baselines import (
     SimpleRecurrentBaseline,
     MetricsReport,
     compute_endpoint_error,
-    compute_trajectory_error,
-    compute_kl_divergence,
-    compute_perplexity,
     compute_latency_metrics,
-    compute_stability_metrics,
     get_parameter_counts,
 )
 
@@ -475,7 +471,7 @@ def main():
     # Evaluate student model if checkpoint provided
     if args.checkpoint:
         logger.info(f"\n{'='*60}")
-        logger.info(f"Evaluating student model from checkpoint")
+        logger.info("Evaluating student model from checkpoint")
         logger.info("="*60)
 
         model = create_student_model(config, device, args.checkpoint)
