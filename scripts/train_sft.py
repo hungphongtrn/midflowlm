@@ -121,29 +121,10 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
     logger.info(f"Tokenizer loaded: pad_token={tokenizer.pad_token!r}")
 
-    # 2. Load model with warm-start
-    logger.info("Loading SFTFlowMidblockModel...")
-    checkpoint_cfg = config.get("checkpoint", {})
-    checkpoint_path = checkpoint_cfg.get("path", "models/p3_d3_mix_c/checkpoint.pth")
+    # 2. Resolve HF token
+    hf_token = _resolve_hf_token(args.hf_token)
 
-    dtype = torch.float32 if args.fp32 else torch.bfloat16
-    model = SFTFlowMidblockModel(
-        model_name=model_cfg["name"],
-        start_layer=model_cfg.get("start_layer", 8),
-        end_layer=model_cfg.get("end_layer", 11),
-        thinking_level=model_cfg.get("thinking_level", 32),
-        checkpoint_path=checkpoint_path,
-        torch_dtype=dtype,
-    )
-    logger.info(f"Model created: {model.trainable_params:,} trainable, {model.frozen_params:,} frozen")
-
-    # 3. Validate model setup
-    validate_model_for_training(model)
-
-    # 4. Move to device
-    model = model.to(device)
-
-    # 5. Load or preprocess datasets
+    # 3. Load or preprocess datasets
     data_cfg = config["data"]
     has_processed_dir = "processed_dir" in data_cfg and data_cfg["processed_dir"] is not None
     has_dataset = "dataset" in data_cfg and data_cfg["dataset"] is not None
@@ -166,6 +147,30 @@ def main():
     else:
         logger.error("Neither data.processed_dir nor data.dataset is set in config.")
         sys.exit(1)
+
+    # 4. Download checkpoint if needed
+    checkpoint_cfg = config.get("checkpoint", {})
+    checkpoint_path = _maybe_download_checkpoint(checkpoint_cfg, hf_token)
+
+    # 5. Load model with warm-start
+    logger.info("Loading SFTFlowMidblockModel...")
+
+    dtype = torch.float32 if args.fp32 else torch.bfloat16
+    model = SFTFlowMidblockModel(
+        model_name=model_cfg["name"],
+        start_layer=model_cfg.get("start_layer", 8),
+        end_layer=model_cfg.get("end_layer", 11),
+        thinking_level=model_cfg.get("thinking_level", 32),
+        checkpoint_path=checkpoint_path,
+        torch_dtype=dtype,
+    )
+    logger.info(f"Model created: {model.trainable_params:,} trainable, {model.frozen_params:,} frozen")
+
+    # 6. Validate model setup
+    validate_model_for_training(model)
+
+    # 7. Move to device
+    model = model.to(device)
 
     # 6. Budget estimation
     budget = estimate_training_budget(
