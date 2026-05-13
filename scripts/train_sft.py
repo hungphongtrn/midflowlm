@@ -23,6 +23,7 @@ from transformers import (
     set_seed,
 )
 from datasets import load_from_disk
+from src.data.reasoning_sft import create_reasoning_sft_datasets_from_config
 
 from src.model.sft_flow_midblock import SFTFlowMidblockModel
 from src.training.sft_utils import (
@@ -91,14 +92,29 @@ def main():
     # 4. Move to device
     model = model.to(device)
 
-    # 5. Load datasets
+    # 5. Load or preprocess datasets
     data_cfg = config["data"]
-    train_dir = os.path.join(data_cfg["processed_dir"], "train")
-    eval_dir = os.path.join(data_cfg["processed_dir"], "eval")
-    logger.info(f"Loading train dataset from {train_dir}")
-    train_dataset = load_from_disk(train_dir)
-    logger.info(f"Loading eval dataset from {eval_dir}")
-    eval_dataset = load_from_disk(eval_dir)
+    has_processed_dir = "processed_dir" in data_cfg and data_cfg["processed_dir"] is not None
+    has_dataset = "dataset" in data_cfg and data_cfg["dataset"] is not None
+
+    if has_processed_dir and has_dataset:
+        logger.error("Both data.processed_dir and data.dataset are set. Use one or the other.")
+        sys.exit(1)
+    elif has_processed_dir:
+        train_dir = os.path.join(data_cfg["processed_dir"], "train")
+        eval_dir = os.path.join(data_cfg["processed_dir"], "eval")
+        logger.info("Loading train dataset from %s", train_dir)
+        train_dataset = load_from_disk(train_dir)
+        logger.info("Loading eval dataset from %s", eval_dir)
+        eval_dataset = load_from_disk(eval_dir)
+    elif has_dataset:
+        logger.info("Inline data preprocessing - downloading from HuggingFace Hub")
+        train_dataset, eval_dataset = create_reasoning_sft_datasets_from_config(
+            data_cfg, tokenizer,
+        )
+    else:
+        logger.error("Neither data.processed_dir nor data.dataset is set in config.")
+        sys.exit(1)
 
     # 6. Budget estimation
     budget = estimate_training_budget(
