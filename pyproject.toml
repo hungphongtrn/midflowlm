@@ -17,6 +17,9 @@ dependencies = [
     "tqdm",
     "accelerate",
     "wandb",
+    "liger-kernel>=0.8.0",
+    "trl>=1.4.0",
+    "pytest>=9.0.3",
 ]
 
 [tool.uv.sources]

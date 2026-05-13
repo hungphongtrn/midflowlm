@@ -1,0 +1,50 @@
+# SFT Flow Midblock -- Smoke Test Config
+# Target: RTX 3060 (12GB VRAM)
+#
+# Strategy: minimal data, no eval during training, small batch
+# Runs ~100 training steps to verify the pipeline works
+
+seed: 1337
+
+model:
+  name: "Qwen/Qwen3.5-0.8B"
+  start_layer: 8
+  end_layer: 11
+  thinking_level: 32
+
+data:
+  processed_dir: "./data/reasoning_sft_smoke"  # Smoke test data from Phase 2
+  max_seq_length: 1024  # Reduced for 12GB VRAM
+
+training:
+  output_dir: "./outputs/issue-9/sft_flow_midblock_3060_smoke"
+  run_name: "sft_flow_midblock_smoke"
+
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 1
+
+  max_steps: 100  # Short run for smoke test
+  num_train_epochs: 1
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  lr_scheduler: "cosine"
+  warmup_steps: 10
+
+  save_strategy: "no"
+
+  logging_steps: 5
+  report_to: ["none"]
+
+  # Skip eval during smoke test (saves memory)
+  eval_strategy: "no"
+
+  dataloader_num_workers: 1
+  gradient_checkpointing: false  # No need for BS=1 smoke test
+  dataloader_drop_last: false
+  dataloader_pin_memory: true
+
+checkpoint:
+  path: "models/p3_d3_mix_c/checkpoint.pth"

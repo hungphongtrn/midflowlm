@@ -49,6 +49,35 @@
 - Forward always uses `num_steps = self.thinking_level`
 - Future adaptive-T work can add sampling back
 
+## 2026-05-12: ADR 0005 — Direct tokenization pipeline for GLM reasoning data
+
+**Context:** The existing `prepare_preprocessed_dataset()` in `src/utils/dataset_processing.py` is designed for mixed CPT/SFT datasets with `dataset_utils_ift` and `cache_utils` external dependencies. The GLM reasoning dataset has a unique `meta` field with pre-computed token counts and messages in standard chat format.
+
+**Decision:** Write a dedicated `src/data/reasoning_sft.py` pipeline instead of reusing `prepare_preprocessed_dataset()`. Reuse helper functions (`create_assistant_only_labels`, `pack_tokenized_dataset`, `get_chat_template_separators`) from `src/utils/dataset_processing.py`.
+
+**Rationale:**
+- `dataset_utils_ift` and `cache_utils` are not present in the repo — the functions that import them (`tokenize_sft_dataset`, `prepare_preprocessed_dataset`) are unusable without external code
+- The helper functions we need (`create_assistant_only_labels`, `pack_tokenized_dataset`, `get_chat_template_separators`) have zero external dependencies
+- Direct tokenization via `tokenizer.apply_chat_template()` is simpler than the multi-layer abstraction in `prepare_preprocessed_dataset()`
+- Token budget filtering via `meta.input_tokens + meta.output_tokens` is specific to this dataset
+
+**Consequences:**
+- New pipeline: load raw → filter by token budget → tokenize with chat template → assistant-only mask → pack → save
+- Reuses existing `mask_instruction_tokens` (unsloth clone) and TRL pack_dataset
+- No dependency on `dataset_utils_ift.apply_chat_template`
+
+## 2026-05-12: ADR 0006 — HF Trainer for SFT (confirms ADR 0001)
+
+**Context:** Phase 1 confirmed that `SFTFlowMidblockModel.forward()` is fully HF Trainer compatible. The monkey-patched forward works transparently with HF Trainer's internal call chain.
+
+**Decision:** Use HF Trainer for all CE-only SFT training. No custom training loop needed.
+
+**Consequences:**
+- `scripts/train_sft.py` creates standard `Trainer(model, args, train_dataset, ...)` 
+- `DataCollatorForSeq2Seq` handles padding with label_pad_token_id=-100
+- `MidblockMetricsCallback` adds midblock-specific gradient/param logging
+- Checkpoint management via HF Trainer's built-in `--resume_from_checkpoint`
+
 ## 2026-05-08: ADR 0004 — New dependencies for Qwen3.5 compatibility
 
 **Context:** Qwen3.5-0.8B uses GatedDeltaNet layers (75%) and full-attention layers (25%). These require `causal-conv1d`, `flash-linear-attention`, and `flash-attn`.

@@ -1,0 +1,59 @@
+# SFT Flow Midblock -- Full Training Config
+# Target: 24GB+ GPU (RTX 3090/4090, A6000, H100)
+#
+# Estimated budget:
+#   ~100K packed sequences x 8192 tokens x T=32 x 1 epoch
+#   ~= 800M tokens processed
+#   ~= 10-15 hours on RTX 4090 @ ~0.3 steps/sec (ODE overhead)
+
+seed: 1337
+
+model:
+  name: "Qwen/Qwen3.5-0.8B"
+  start_layer: 8
+  end_layer: 11
+  thinking_level: 32  # Fixed T=32
+
+data:
+  processed_dir: "./data/reasoning_sft"  # Output from Phase 2
+  max_seq_length: 8192
+
+training:
+  output_dir: "./outputs/issue-9/sft_flow_midblock"
+  run_name: "sft_flow_midblock_full"
+
+  # Memory budget: ~20GB for model + data + ODE intermediate states
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 4  # Effective BS = 4
+
+  # Schedule
+  num_train_epochs: 1
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  lr_scheduler: "cosine"
+  warmup_steps: 100
+
+  # Checkpointing
+  save_strategy: "steps"
+  save_steps: 500
+  save_total_limit: 2
+
+  # Logging
+  logging_steps: 10
+  report_to: ["none"]
+
+  # Evaluation
+  eval_strategy: "steps"
+  eval_steps: 500
+
+  # Performance
+  dataloader_num_workers: 2
+  gradient_checkpointing: false  # Only midblock is trainable
+  dataloader_drop_last: false
+  dataloader_pin_memory: true
+
+checkpoint:
+  path: "models/p3_d3_mix_c/checkpoint.pth"

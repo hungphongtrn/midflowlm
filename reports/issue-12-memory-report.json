@@ -1,0 +1,79 @@
+{
+  "issue": 12,
+  "seed": 1337,
+  "device": "NVIDIA GeForce RTX 3060",
+  "thinking_level": 32,
+  "results": [
+    {
+      "seq_len": 512,
+      "ok": true,
+      "peak_allocated_mb": 3952.49,
+      "peak_reserved_mb": 3982.0,
+      "active_peak_mb": 3952.49,
+      "allocated_peak_mb": 3952.49,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 768,
+      "ok": true,
+      "peak_allocated_mb": 5160.54,
+      "peak_reserved_mb": 5170.0,
+      "active_peak_mb": 5160.54,
+      "allocated_peak_mb": 5160.54,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 1024,
+      "ok": true,
+      "peak_allocated_mb": 6370.15,
+      "peak_reserved_mb": 6394.0,
+      "active_peak_mb": 6370.15,
+      "allocated_peak_mb": 6370.15,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 1280,
+      "ok": true,
+      "peak_allocated_mb": 7576.7,
+      "peak_reserved_mb": 7584.0,
+      "active_peak_mb": 7576.7,
+      "allocated_peak_mb": 7576.7,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 1536,
+      "ok": true,
+      "peak_allocated_mb": 8784.68,
+      "peak_reserved_mb": 8806.0,
+      "active_peak_mb": 8784.68,
+      "allocated_peak_mb": 8784.68,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 1792,
+      "ok": true,
+      "peak_allocated_mb": 9992.73,
+      "peak_reserved_mb": 10008.0,
+      "active_peak_mb": 9992.73,
+      "allocated_peak_mb": 9992.73,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    },
+    {
+      "seq_len": 2048,
+      "ok": true,
+      "peak_allocated_mb": 11203.91,
+      "peak_reserved_mb": 11228.0,
+      "active_peak_mb": 11203.91,
+      "allocated_peak_mb": 11203.91,
+      "num_alloc_retries": 0,
+      "num_ooms": 0
+    }
+  ],
+  "first_oom_seq_len": null
+}
