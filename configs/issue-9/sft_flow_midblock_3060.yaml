@@ -57,6 +57,11 @@ training:
   dataloader_drop_last: false
   dataloader_pin_memory: true
 
+  # Hub push
+  push_to_hub: true
+  hub_model_id: "hungphongtrn/midflowlm-phase2"
+  hub_strategy: "end"
+
 checkpoint:
   path: "models/p3_d3_mix_c/checkpoint.pth"
   remote_repo: "hungphongtrn/midflowlm-phase1"
