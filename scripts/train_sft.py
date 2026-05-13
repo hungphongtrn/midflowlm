@@ -85,6 +85,28 @@ def _maybe_download_checkpoint(checkpoint_cfg: dict, token: str | None) -> str:
     return local_path
 
 
+def _generate_experiment_info(config: dict, train_result, model) -> dict:
+    """Generate experiment metadata dict for post-training HF Hub push."""
+    import datetime
+
+    model_cfg = config["model"]
+    return {
+        "experiment_key": "issue-9",
+        "name": "SFT Flow Midblock (Issue #9)",
+        "architecture": "flow_midblock",
+        "base_model": model_cfg["name"],
+        "start_layer": model_cfg.get("start_layer", 8),
+        "end_layer": model_cfg.get("end_layer", 11),
+        "thinking_level": model_cfg.get("thinking_level", 32),
+        "trainable_params": getattr(model, "trainable_params", None),
+        "frozen_params": getattr(model, "frozen_params", None),
+        "global_step": train_result.global_step,
+        "training_loss": getattr(train_result, "training_loss", None),
+        "total_flos": getattr(train_result, "total_flos", 0),
+        "training_completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+
 def load_config(config_path: str) -> dict:
     with open(config_path) as f:
         return yaml.safe_load(f)
@@ -269,6 +291,33 @@ def main():
     train_result = trainer.train(
         resume_from_checkpoint=training_args.resume_from_checkpoint,
     )
+
+    # Push experiment_info.json to HF Hub
+    if training_cfg.get("push_to_hub") and hf_token:
+        from huggingface_hub import upload_file
+        import json as _json
+        import tempfile as _tempfile
+
+        info = _generate_experiment_info(config, train_result, model)
+        hub_model_id = training_cfg.get("hub_model_id", "hungphongtrn/midflowlm-phase2")
+        tmp_path = ""
+
+        try:
+            with _tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+                _json.dump(info, f, indent=2)
+                tmp_path = f.name
+            upload_file(
+                path_or_fileobj=tmp_path,
+                path_in_repo="issue-9/experiment_info.json",
+                repo_id=hub_model_id,
+                token=hf_token,
+            )
+            logger.info("experiment_info.json pushed to %s/issue-9/", hub_model_id)
+        except Exception as e:
+            logger.warning("Failed to push experiment_info.json: %s", e)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
     # 9. Metrics summary
     logger.info("\n" + "=" * 60)
