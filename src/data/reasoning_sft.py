@@ -90,6 +90,7 @@ def create_reasoning_sft_datasets(
     max_train_samples: int | None = None,
     max_eval_samples: int | None = None,
     seed: int = 1337,
+    packing_strategy: str = "bfd",
 ) -> tuple[Dataset, Dataset]:
     if not 0 < val_split < 1:
         raise ValueError(
@@ -129,7 +130,11 @@ def create_reasoning_sft_datasets(
 
     pack_cols = [c for c in ("input_ids", "labels") if c in train_tok.column_names]
     train_for_pack = train_tok.select_columns(pack_cols)
-    train_packed = pack_tokenized_dataset(train_for_pack, max_seq_length=max_length)
+    train_packed = pack_tokenized_dataset(
+        train_for_pack,
+        max_seq_length=max_length,
+        packing_strategy=packing_strategy,
+    )
 
     def _with_attention_mask(example: dict[str, Any]) -> dict[str, list[int]]:
         input_ids = example["input_ids"]
