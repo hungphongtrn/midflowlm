@@ -184,6 +184,14 @@ def main():
 
     # 7. Set up HF Trainer
     training_cfg = config["training"]
+    if training_cfg.get("push_to_hub") and not hf_token:
+        logger.warning(
+            "push_to_hub is true but no HuggingFace token found. "
+            "Training will proceed but checkpoint will NOT be pushed. "
+            "Set --hf-token, HF_TOKEN env var, or run `huggingface-cli login`."
+        )
+        training_cfg["push_to_hub"] = False
+
     output_dir = training_cfg["output_dir"]
     run_name = training_cfg.get("run_name", "sft_flow_midblock")
 
@@ -231,6 +239,10 @@ def main():
         dataloader_drop_last=training_cfg.get("dataloader_drop_last", False),
         # Resume
         resume_from_checkpoint=training_cfg.get("resume_from_checkpoint"),
+        push_to_hub=training_cfg.get("push_to_hub", False),
+        hub_model_id=training_cfg.get("hub_model_id"),
+        hub_strategy=training_cfg.get("hub_strategy", "end"),
+        hub_token=hf_token,
     )
 
     data_collator = DataCollatorForSeq2Seq(
