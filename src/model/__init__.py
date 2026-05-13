@@ -13,6 +13,7 @@ from .student_qwen import (
     FrozenQwenStudent,
     StudentOutput,
 )
+from .sft_flow_midblock import SFTFlowMidblockModel
 from .ode import MidblockVectorField, build_solver_options
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "BoundaryConditioningAdapter",
     "FrozenQwenStudent",
     "StudentOutput",
+    "SFTFlowMidblockModel",
     "MidblockVectorField",
     "build_solver_options",
 ]
