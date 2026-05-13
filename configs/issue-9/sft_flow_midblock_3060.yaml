@@ -13,8 +13,19 @@ model:
   thinking_level: 32
 
 data:
-  processed_dir: "./data/reasoning_sft_smoke"  # Smoke test data from Phase 2
-  max_seq_length: 1024  # Reduced for 12GB VRAM
+  dataset:
+    name: "Jackrong/GLM-5.1-Reasoning-1M-Cleaned"
+    split: "train"
+  processing:
+    max_total_tokens: 1024
+    num_proc: 4
+    val_split: 0.02
+    max_train_samples: null
+    max_eval_samples: 200
+    packing_strategy: "bfd"
+    seed: 1337
+  cache_dir: "./data/reasoning_sft_cache_3060"
+  max_seq_length: 1024
 
 training:
   output_dir: "./outputs/issue-9/sft_flow_midblock_3060_smoke"
