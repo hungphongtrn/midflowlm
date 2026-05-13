@@ -58,7 +58,11 @@ Repository working rules for Hermes and other coding agents.
 - Verify one batch forward pass and one optimizer step
 - Record any library/API assumptions in docs
 
-### IMPORTANT: DO NOT INSTALL ACTUAL PACKAGES ON THIS DEV MACHINE. To add packages, use uv add <package> --no-sync
+### IMPORTANT: ALWAYS USE `uv run` TO EXECUTE PYTHON-RELATED COMMANDS
+Use `uv run python <script>` or `uv run <tool>` for any Python command. Never invoke Python directly with `python`, `python3`, or `pip`. This ensures the project's pinned dependencies (as declared in `pyproject.toml`) are used consistently.
+
+### Vast.ai CLI
+Use `uv run vastai <command>` for all Vast.ai operations. This ensures the correct `vastai` version from the project's dependencies is used.
 
 ### IMPORTANT: DO NOT BUILD THE PACKAGE
 This project uses editable/development mode only. Never run `uv sync`, `pip install -e .`, or any package build commands. Dependencies are managed via requirements.txt and pyproject.toml for documentation only.

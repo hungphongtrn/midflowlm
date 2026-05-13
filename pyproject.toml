@@ -3,9 +3,12 @@ name = "midflowlm"
 version = "0.1.0"
 description = "Iterative latent matching / distillation for language models"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = "==3.12.0"
 dependencies = [
-    "torch",
+    "torch==2.10.0",
+    "causal-conv1d",
+    "flash-attn",
+    "flash-linear-attention",
     "transformers",
     "datasets",
     "torchmetrics",
@@ -18,18 +21,22 @@ dependencies = [
     "accelerate",
     "wandb",
     "liger-kernel>=0.8.0",
-    "trl>=1.4.0",
-    "pytest>=9.0.3",
 ]
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu128" }
+torch = { index = "pytorch-cu130" }
+causal-conv1d = { url = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.1.post4/causal_conv1d-1.6.1+cu13torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
+flash-attn = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu130torch2.10-cp312-cp312-linux_x86_64.whl" }
+flash-linear-attention = { git = "https://github.com/fla-org/flash-linear-attention.git" }
 
 [project.optional-dependencies]
 dev = [
     "pytest",
     "black",
     "ruff",
+]
+vast = [
+    "vastai",
 ]
 
 [build-system]
@@ -40,8 +47,8 @@ build-backend = "hatchling.build"
 default-groups = []
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.hatch.build.targets.wheel]
