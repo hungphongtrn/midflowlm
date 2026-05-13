@@ -15,7 +15,6 @@ model:
   thinking_level: 32  # Fixed T=32
 
 data:
-  processed_dir: "./data/reasoning_sft"  # Backward compat: load_from_disk()
   dataset:
     name: "Jackrong/GLM-5.1-Reasoning-1M-Cleaned"
     split: "train"
