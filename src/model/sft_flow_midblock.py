@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 class SFTFlowMidblockModel(nn.Module):
     """Frozen Qwen with trainable FlowMidblock replacing layers start:end+1.
 
+    Required by HF Trainer for save/load compatibility.
     Architecture:
         1. Qwen Embeddings (frozen)
         2. Qwen Layers 0..start_layer-1 (frozen)
@@ -37,6 +38,8 @@ class SFTFlowMidblockModel(nn.Module):
         torch_dtype: Data type for model weights
     """
 
+    _keys_to_ignore_on_save = None
+
     def __init__(
         self,
         model_name: str = "Qwen/Qwen3.5-0.8B",
@@ -47,6 +50,7 @@ class SFTFlowMidblockModel(nn.Module):
         torch_dtype: torch.dtype = torch.bfloat16,
     ):
         super().__init__()
+        self._keys_to_ignore_on_save = None
         self.model_name = model_name
         self.start_layer = start_layer
         self.end_layer = end_layer

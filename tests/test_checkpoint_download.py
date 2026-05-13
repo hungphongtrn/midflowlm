@@ -75,3 +75,32 @@ def test_maybe_download_checkpoint_passes_token_to_download():
             _maybe_download_checkpoint(cfg, token="secret")
 
     assert mock_download.call_args.kwargs["token"] == "secret"
+
+
+def test_maybe_download_checkpoint_with_nested_remote_filename_uses_parent_local_dir():
+    cfg = {
+        "path": "models/p3_d3_mix_c/checkpoint.pth",
+        "remote_repo": "org/repo",
+        "remote_filename": "p3_d3_mix_c/checkpoint.pth",
+    }
+    with patch("scripts.train_sft.os.path.exists", return_value=False):
+        with patch(
+            "scripts.train_sft.hf_hub_download",
+            return_value="models/p3_d3_mix_c/checkpoint.pth",
+        ) as mock_download:
+            result = _maybe_download_checkpoint(cfg, token=None)
+
+    assert result == "models/p3_d3_mix_c/checkpoint.pth"
+    mock_download.assert_called_once_with(
+        repo_id="org/repo",
+        filename="p3_d3_mix_c/checkpoint.pth",
+        local_dir="models/p3_d3_mix_c",
+        local_dir_use_symlinks=False,
+        token=None,
+    )
+
+
+def test_sft_flow_midblock_model_exposes_hf_save_ignore_keys_attribute():
+    from src.model.sft_flow_midblock import SFTFlowMidblockModel
+
+    assert hasattr(SFTFlowMidblockModel, "_keys_to_ignore_on_save")
