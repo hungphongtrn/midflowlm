@@ -64,3 +64,18 @@
 **Context:** `configs/issue-9/sft_data_glm.yaml` was used by the now-removed `scripts/prepare_reasoning_sft_data.py`.
 **Decision:** Leave the file in place for reference but do not reference it from train_sft.py. It is harmless dead config.
 **Rationale:** Removes unnecessary churn. It will fade out naturally.
+
+## 2026-05-13 (Phase 2 complete): Execution order fixed — data before model
+**Context:** Phase 1 left the original order (model before data). Phase 2 Task 4 reordered main().
+**Decision:** New order: tokenizer → HF token → data → checkpoint download → model → validate → move to device.
+**Rationale:** Tokenizer needed for data AND model. Data doesn't depend on model. Checkpoint download depends on resolved HF token, not on model. Order now reflects true dependencies.
+
+## 2026-05-13 (Phase 3 complete): upload_file imported lazily after training
+**Context:** `experiment_info.json` upload uses `huggingface_hub.upload_file()` which is only needed when push_to_hub is enabled.
+**Decision:** Import `upload_file` inline in the upload block (not at module level like `hf_hub_download`).
+**Rationale:** `hf_hub_download` is always needed (checkpoint download). `upload_file` is conditional. No separate import block means cleaner module-level imports. The cost of lazy import is negligible since it happens at train end.
+
+## 2026-05-13 (Phase 3 complete): 30 tests total across all phases
+**Context:** All three phases complete.
+**Decision:** Distribution: 17 data pipeline tests (Phase 1), 9 checkpoint download tests (Phase 2), 4 experiment info tests (Phase 3).
+**Rationale:** Data pipeline has the most edge cases (filtering, caching, hashing, backward compat). Checkpoint download tests cover auth chain and local/remote paths. Experiment info tests verify key contract (all keys present, defaults, UTC timestamp).
