@@ -3,9 +3,9 @@
 > **For agentic workers:** Use subagent-driven-development. Start with the current phase — don't read ahead.
 
 ## Quick Status
-- **Current Phase:** Phase 1 - Config + Data Pipeline
-- **Next Up:** Phase 2 - Remote Checkpoint + Smoke Test
-- **Overall Progress:** 0/3 phases complete
+- **Current Phase:** Phase 2 - Remote Checkpoint + Smoke Test
+- **Next Up:** Phase 3 - HF Push + Integration
+- **Overall Progress:** 1/3 phases complete
 
 ## Start Here
 New implementer? Read in this order:
@@ -19,7 +19,7 @@ New implementer? Read in this order:
 
 | Phase | Status | Outcome | Document |
 |-------|--------|---------|----------|
-| 1 - Config + Data Pipeline | 🔲 Not Started | Inline preprocessing with cache hashing | [phase-01-*.md](./phase-01-config-data-pipeline.md) |
+| 1 - Config + Data Pipeline | ✅ Complete | Inline preprocessing with cache hashing (17 tests) | [phase-01-*.md](./phase-01-config-data-pipeline.md) |
 | 2 - Remote Checkpoint + Smoke Test | 🔲 Pending | --smoke-test, auto-download checkpoint | [phase-02-*.md](./phase-02-remote-checkpoint-smoke-test.md) |
 | 3 - HF Push + Integration | 🔲 Pending | Post-training push, acceptance criteria | [phase-03-*.md](./phase-03-hf-push-integration.md) |
 
