@@ -94,7 +94,7 @@ def test_maybe_download_checkpoint_with_nested_remote_filename_uses_parent_local
     mock_download.assert_called_once_with(
         repo_id="org/repo",
         filename="p3_d3_mix_c/checkpoint.pth",
-        local_dir="models/p3_d3_mix_c",
+        local_dir="models",
         local_dir_use_symlinks=False,
         token=None,
     )

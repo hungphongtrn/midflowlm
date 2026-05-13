@@ -73,7 +73,16 @@ def _maybe_download_checkpoint(checkpoint_cfg: dict, token: str | None) -> str:
         )
 
     logger.info("Downloading checkpoint from %s/%s ...", remote_repo, remote_filename)
-    local_dir = os.path.dirname(local_path) or "."
+    # Compute local_dir so that hf_hub_download places remote_filename at local_path.
+    # hf_hub_download(local_dir=X, filename=Y) produces X/Y, so strip the
+    # remote_filename suffix (with its leading /) from local_path to get X.
+    suffix = "/" + remote_filename
+    if local_path.endswith(suffix):
+        local_dir = local_path[:-len(suffix)]
+    elif local_path.endswith(remote_filename):
+        local_dir = local_path[:-len(remote_filename)]
+    else:
+        local_dir = os.path.dirname(local_path) or "."
     local_path = hf_hub_download(
         repo_id=remote_repo,
         filename=remote_filename,
