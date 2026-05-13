@@ -94,11 +94,17 @@ def main():
     parser = argparse.ArgumentParser(description="Train SFT Flow Matcher")
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config")
     parser.add_argument("--fp32", action="store_true", help="Force FP32 training")
+    parser.add_argument("--smoke-test", action="store_true", help="Run 1 training step with full data pipeline")
+    parser.add_argument("--hf-token", type=str, default=None, help="HuggingFace Hub token")
     args = parser.parse_args()
 
     config = load_config(args.config)
     seed = config.get("seed", 1337)
     set_seed(seed)
+
+    if args.smoke_test:
+        logger.info("SMOKE TEST MODE: max_steps forced to 1")
+        config.setdefault("training", {})["max_steps"] = 1
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
