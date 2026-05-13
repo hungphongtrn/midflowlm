@@ -21,6 +21,7 @@ dependencies = [
     "accelerate",
     "wandb",
     "liger-kernel>=0.8.0",
+    "trl>=1.4.0",
 ]
 
 [tool.uv.sources]
