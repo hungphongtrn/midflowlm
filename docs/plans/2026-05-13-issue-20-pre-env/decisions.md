@@ -1,0 +1,51 @@
+# Decision Log
+
+## 2026-05-13: Inline vs processed path detection
+**Context:** Configs need to support both old `data.processed_dir` and new `data.dataset` fields.
+**Decision:** Presence-based mutual exclusion. If `data.processed_dir` → load from disk. If `data.dataset` → inline prep. Error if both set.
+**Rationale:** Clean detection, no new mode flag, impossible to misconfigure.
+
+## 2026-05-13: Cache invalidation via config hash
+**Context:** Reprocessing is expensive (~30-60 min for full dataset). Need to detect config changes.
+**Decision:** Store `cache_info.json` with sha256 hash of all preprocessing params. Re-process if hash mismatches.
+**Rationale:** Prevents silent staleness. Hashing all params (not a subset) is safer. Cost of unnecessary reprocessing is acceptable.
+
+## 2026-05-13: Checkpoint download uses hf_hub_download
+**Context:** Issue proposed raw HTTP URL. Existing codebase uses `huggingface_hub` API.
+**Decision:** Use `hf_hub_download(repo_id, filename)` with separate `remote_repo` and `remote_filename` config fields.
+**Rationale:** Consistent with existing `push_checkpoints_to_hf.py` patterns. Handles auth, caching, resume. No raw HTTP.
+
+## 2026-05-13: Post-training push uses HF Trainer's push_to_hub
+**Context:** Could do standalone push (only midblock weights) or use HF Trainer's built-in mechanism.
+**Decision:** Use `training.push_to_hub: true` (Option C). Full safetensors uploaded. Midblock extractable downstream via key filtering.
+**Rationale:** Simplest integration. HF Trainer already handles Hub lifecycle. Bandwidth cost of frozen weights is acceptable.
+
+## 2026-05-13: --smoke-test is CLI-only, no config block
+**Context:** Issue proposed `smoke_test.max_steps` config field.
+**Decision:** Drop the config block. `--smoke-test` hardcodes `max_steps=1` in code.
+**Rationale:** Smoke test is an operator toggle, not a configurable experiment dimension. YAGNI.
+
+## 2026-05-13: Full dataset processing in smoke test
+**Context:** Current smoke test subsets to 1000 samples. New design needs to validate data packing at real scale.
+**Decision:** Process full dataset, cache it, run 1 training step. No sample limits.
+**Rationale:** Validates the full pipeline including packing behavior driven by real data volume. Cache amortizes the cost.
+
+## 2026-05-13: prepare_reasoning_sft_data.py removed
+**Context:** Inline preprocessing makes the standalone script redundant.
+**Decision:** Remove entirely.
+**Rationale:** Single source of truth. No maintenance burden from deprecated code. Backward compat via `processed_dir` path still works.
+
+## 2026-05-13: Auth chain for HF operations
+**Context:** Both download and upload need auth for private/gated repos.
+**Decision:** Single unified chain: `--hf-token` arg → `HF_TOKEN` env → `huggingface-cli login`. Warn but don't crash if missing.
+**Rationale:** Simpler than split auth. `huggingface_hub` handles unauthenticated access gracefully for public repos. Token only strictly needed for writes.
+
+## 2026-05-13: 3060 config gets own cache dir via hash
+**Context:** 3060 config has `max_seq_length: 1024` vs full config's `8192`.
+**Decision:** Let the cache hash produce different hashes, resulting in separate cache dirs. Meta-filter uses `max_total_tokens: 1024` for 3060.
+**Rationale:** No special-casing needed. The hash mechanism handles it automatically.
+
+## 2026-05-13: Code organization — business logic in src/data/
+**Context:** Inline preprocessing adds significant logic to training script.
+**Decision:** New function `create_reasoning_sft_datasets_from_config()` in `src/data/reasoning_sft.py`. Script calls it. Helper functions for checkpoint/push stay in-script.
+**Rationale:** Data logic belongs in the data module. Script stays thin orchestration.
