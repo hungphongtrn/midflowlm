@@ -1,5 +1,7 @@
 from datasets import Dataset
 from unittest.mock import patch
+import json
+import os
 
 
 class DummyTokenizer:
@@ -315,3 +317,190 @@ def test_create_reasoning_sft_datasets_raises_when_empty_after_subsampling():
             assert False, "Expected ValueError for empty split after subsampling"
         except ValueError as exc:
             assert "after subsampling" in str(exc)
+
+
+def _data_cfg(cache_dir: str, max_seq_length: int = 64) -> dict:
+    return {
+        "dataset": {"name": "dummy/reasoning", "split": "train"},
+        "processing": {
+            "num_proc": 1,
+            "val_split": 0.2,
+            "max_train_samples": None,
+            "max_eval_samples": None,
+            "packing_strategy": "bfd",
+            "seed": 42,
+            "max_total_tokens": 64,
+        },
+        "cache_dir": cache_dir,
+        "max_seq_length": max_seq_length,
+    }
+
+
+def test_compute_cache_hash_is_deterministic(tmp_path):
+    from src.data.reasoning_sft import _compute_cache_hash
+
+    cfg = _data_cfg(str(tmp_path / "cache"))
+    assert _compute_cache_hash(cfg) == _compute_cache_hash(cfg)
+
+
+def test_compute_cache_hash_changes_when_config_changes(tmp_path):
+    from src.data.reasoning_sft import _compute_cache_hash
+
+    cfg_a = _data_cfg(str(tmp_path / "cache_a"), max_seq_length=64)
+    cfg_b = _data_cfg(str(tmp_path / "cache_b"), max_seq_length=128)
+    assert _compute_cache_hash(cfg_a) != _compute_cache_hash(cfg_b)
+
+
+def test_from_config_returns_expected_columns(tmp_path):
+    from src.data.reasoning_sft import create_reasoning_sft_datasets_from_config
+
+    cfg = _data_cfg(str(tmp_path / "cache"))
+    mock_raw = Dataset.from_list([{"conversations": []}])
+    train_ds = Dataset.from_list([{"input_ids": [1], "labels": [1], "attention_mask": [1]}])
+    eval_ds = Dataset.from_list([{"input_ids": [2], "labels": [2], "attention_mask": [1]}])
+
+    with patch("src.data.reasoning_sft.load_dataset", return_value=mock_raw), patch(
+        "src.data.reasoning_sft.create_reasoning_sft_datasets", return_value=(train_ds, eval_ds)
+    ):
+        out_train, out_eval = create_reasoning_sft_datasets_from_config(cfg, DummyTokenizer())
+
+    assert set(out_train.column_names) == {"input_ids", "attention_mask", "labels"}
+    assert set(out_eval.column_names) == {"input_ids", "attention_mask", "labels"}
+
+
+def test_from_config_cache_miss_processes_and_writes_cache(tmp_path):
+    from src.data.reasoning_sft import create_reasoning_sft_datasets_from_config
+
+    cache_dir = str(tmp_path / "cache")
+    cfg = _data_cfg(cache_dir)
+    mock_raw = Dataset.from_list([{"conversations": []}])
+    train_ds = Dataset.from_list([{"input_ids": [1], "labels": [1], "attention_mask": [1]}])
+    eval_ds = Dataset.from_list([{"input_ids": [2], "labels": [2], "attention_mask": [1]}])
+
+    with patch("src.data.reasoning_sft.load_dataset", return_value=mock_raw), patch(
+        "src.data.reasoning_sft.create_reasoning_sft_datasets", return_value=(train_ds, eval_ds)
+    ) as mock_preprocess:
+        create_reasoning_sft_datasets_from_config(cfg, DummyTokenizer())
+
+    assert mock_preprocess.called
+    assert os.path.exists(os.path.join(cache_dir, "train"))
+    assert os.path.exists(os.path.join(cache_dir, "eval"))
+    assert os.path.exists(os.path.join(cache_dir, "cache_info.json"))
+
+
+def test_from_config_cache_hit_skips_preprocessing(tmp_path):
+    from src.data.reasoning_sft import (
+        _compute_cache_hash,
+        create_reasoning_sft_datasets_from_config,
+    )
+
+    cache_dir = str(tmp_path / "cache")
+    os.makedirs(cache_dir)
+    train_path = os.path.join(cache_dir, "train")
+    eval_path = os.path.join(cache_dir, "eval")
+    train_ds = Dataset.from_list([{"input_ids": [1], "labels": [1], "attention_mask": [1]}])
+    eval_ds = Dataset.from_list([{"input_ids": [2], "labels": [2], "attention_mask": [1]}])
+    train_ds.save_to_disk(train_path)
+    eval_ds.save_to_disk(eval_path)
+
+    cfg = _data_cfg(cache_dir)
+    with open(os.path.join(cache_dir, "cache_info.json"), "w") as f:
+        json.dump({"config_hash": _compute_cache_hash(cfg)}, f)
+
+    with patch("src.data.reasoning_sft.load_dataset") as mock_load, patch(
+        "src.data.reasoning_sft.create_reasoning_sft_datasets"
+    ) as mock_preprocess:
+        out_train, out_eval = create_reasoning_sft_datasets_from_config(cfg, DummyTokenizer())
+
+    mock_load.assert_not_called()
+    mock_preprocess.assert_not_called()
+    assert len(out_train) == 1
+    assert len(out_eval) == 1
+
+
+def test_from_config_stale_cache_reprocesses(tmp_path):
+    from src.data.reasoning_sft import create_reasoning_sft_datasets_from_config
+
+    cache_dir = str(tmp_path / "cache")
+    os.makedirs(cache_dir)
+    with open(os.path.join(cache_dir, "cache_info.json"), "w") as f:
+        json.dump({"config_hash": "stale_hash"}, f)
+
+    cfg = _data_cfg(cache_dir)
+    mock_raw = Dataset.from_list([{"conversations": []}])
+    train_ds = Dataset.from_list([{"input_ids": [1], "labels": [1], "attention_mask": [1]}])
+    eval_ds = Dataset.from_list([{"input_ids": [2], "labels": [2], "attention_mask": [1]}])
+
+    with patch("src.data.reasoning_sft.load_dataset", return_value=mock_raw), patch(
+        "src.data.reasoning_sft.create_reasoning_sft_datasets", return_value=(train_ds, eval_ds)
+    ) as mock_preprocess:
+        create_reasoning_sft_datasets_from_config(cfg, DummyTokenizer())
+
+    assert mock_preprocess.called
+
+
+def test_from_config_force_reprocess_bypasses_valid_cache(tmp_path):
+    from src.data.reasoning_sft import (
+        _compute_cache_hash,
+        create_reasoning_sft_datasets_from_config,
+    )
+
+    cache_dir = str(tmp_path / "cache")
+    os.makedirs(cache_dir)
+    cfg = _data_cfg(cache_dir)
+
+    old_train = Dataset.from_list([{"input_ids": [9], "labels": [9], "attention_mask": [1]}])
+    old_eval = Dataset.from_list([{"input_ids": [8], "labels": [8], "attention_mask": [1]}])
+    old_train.save_to_disk(os.path.join(cache_dir, "train"))
+    old_eval.save_to_disk(os.path.join(cache_dir, "eval"))
+    with open(os.path.join(cache_dir, "cache_info.json"), "w") as f:
+        json.dump({"config_hash": _compute_cache_hash(cfg)}, f)
+
+    mock_raw = Dataset.from_list([{"conversations": []}])
+    new_train = Dataset.from_list([{"input_ids": [1], "labels": [1], "attention_mask": [1]}])
+    new_eval = Dataset.from_list([{"input_ids": [2], "labels": [2], "attention_mask": [1]}])
+
+    with patch("src.data.reasoning_sft.load_dataset", return_value=mock_raw) as mock_load, patch(
+        "src.data.reasoning_sft.create_reasoning_sft_datasets", return_value=(new_train, new_eval)
+    ):
+        out_train, out_eval = create_reasoning_sft_datasets_from_config(
+            cfg, DummyTokenizer(), force_reprocess=True
+        )
+
+    assert mock_load.called
+    assert out_train[0]["input_ids"] == [1]
+    assert out_eval[0]["input_ids"] == [2]
+
+    from datasets import load_from_disk
+
+    disk_train = load_from_disk(os.path.join(cache_dir, "train"))
+    disk_eval = load_from_disk(os.path.join(cache_dir, "eval"))
+    assert disk_train[0]["input_ids"] == [1]
+    assert disk_eval[0]["input_ids"] == [2]
+
+
+def test_from_config_partial_cache_reprocesses(tmp_path):
+    from src.data.reasoning_sft import (
+        _compute_cache_hash,
+        create_reasoning_sft_datasets_from_config,
+    )
+
+    cache_dir = str(tmp_path / "cache")
+    os.makedirs(cache_dir)
+    cfg = _data_cfg(cache_dir)
+
+    train_only = Dataset.from_list([{"input_ids": [7], "labels": [7], "attention_mask": [1]}])
+    train_only.save_to_disk(os.path.join(cache_dir, "train"))
+    with open(os.path.join(cache_dir, "cache_info.json"), "w") as f:
+        json.dump({"config_hash": _compute_cache_hash(cfg)}, f)
+
+    mock_raw = Dataset.from_list([{"conversations": []}])
+    new_train = Dataset.from_list([{"input_ids": [1], "labels": [1], "attention_mask": [1]}])
+    new_eval = Dataset.from_list([{"input_ids": [2], "labels": [2], "attention_mask": [1]}])
+
+    with patch("src.data.reasoning_sft.load_dataset", return_value=mock_raw) as mock_load, patch(
+        "src.data.reasoning_sft.create_reasoning_sft_datasets", return_value=(new_train, new_eval)
+    ):
+        create_reasoning_sft_datasets_from_config(cfg, DummyTokenizer())
+
+    assert mock_load.called

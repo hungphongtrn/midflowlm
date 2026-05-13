@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
+import os as _os
 from typing import Any
 
-from datasets import Dataset
+from datasets import Dataset, load_dataset, load_from_disk
 from transformers import PreTrainedTokenizer
 
 from src.utils.dataset_processing import (
@@ -10,6 +14,30 @@ from src.utils.dataset_processing import (
     get_chat_template_separators,
     pack_tokenized_dataset,
 )
+
+
+def _compute_cache_hash(data_cfg: dict) -> str:
+    """Compute a deterministic hash of preprocessing parameters."""
+    processing = data_cfg.get("processing", {})
+    dataset_cfg = data_cfg.get("dataset", {})
+    hasher = hashlib.sha256()
+    hasher.update(
+        json.dumps(
+            {
+                "dataset_name": dataset_cfg.get("name"),
+                "dataset_split": dataset_cfg.get("split"),
+                "num_proc": processing.get("num_proc"),
+                "val_split": processing.get("val_split"),
+                "max_train_samples": processing.get("max_train_samples"),
+                "max_eval_samples": processing.get("max_eval_samples"),
+                "packing_strategy": processing.get("packing_strategy"),
+                "seed": processing.get("seed"),
+                "max_seq_length": data_cfg.get("max_seq_length"),
+            },
+            sort_keys=True,
+        ).encode()
+    )
+    return hasher.hexdigest()
 
 
 def filter_by_token_budget(
@@ -152,3 +180,70 @@ def create_reasoning_sft_datasets(
         eval_final = eval_final.remove_columns(eval_drop)
 
     return train_final, eval_final
+
+
+def create_reasoning_sft_datasets_from_config(
+    data_cfg: dict,
+    tokenizer: PreTrainedTokenizer,
+    force_reprocess: bool = False,
+) -> tuple[Dataset, Dataset]:
+    """Load and preprocess reasoning SFT dataset from a data config section."""
+    dataset_cfg = data_cfg["dataset"]
+    processing = data_cfg["processing"]
+    cache_dir = data_cfg["cache_dir"]
+    max_seq_length = data_cfg["max_seq_length"]
+
+    expected_hash = _compute_cache_hash(data_cfg)
+    cache_info_path = _os.path.join(cache_dir, "cache_info.json")
+
+    logger = logging.getLogger("src.data.reasoning_sft")
+
+    if not force_reprocess and _os.path.exists(cache_info_path):
+        try:
+            with open(cache_info_path) as f:
+                cached_info = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to read cache info from %s: %s", cache_info_path, exc)
+        else:
+            if cached_info.get("config_hash") == expected_hash:
+                train_path = _os.path.join(cache_dir, "train")
+                eval_path = _os.path.join(cache_dir, "eval")
+                if _os.path.exists(train_path) and _os.path.exists(eval_path):
+                    try:
+                        logger.info("Cache hit - loading preprocessed datasets from %s", cache_dir)
+                        return load_from_disk(train_path), load_from_disk(eval_path)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to load cached datasets from %s: %s. Reprocessing.",
+                            cache_dir,
+                            exc,
+                        )
+
+    logger.info(
+        "Loading dataset %s (split=%s) from HuggingFace Hub",
+        dataset_cfg["name"],
+        dataset_cfg["split"],
+    )
+    ds = load_dataset(dataset_cfg["name"], split=dataset_cfg["split"])
+    logger.info("Loaded %s raw samples", f"{len(ds):,}")
+
+    train_ds, eval_ds = create_reasoning_sft_datasets(
+        ds,
+        tokenizer,
+        max_length=max_seq_length,
+        num_proc=processing.get("num_proc", 4),
+        val_split=processing.get("val_split", 0.02),
+        max_train_samples=processing.get("max_train_samples"),
+        max_eval_samples=processing.get("max_eval_samples"),
+        seed=processing.get("seed", 1337),
+        packing_strategy=processing.get("packing_strategy", "bfd"),
+    )
+
+    _os.makedirs(cache_dir, exist_ok=True)
+    train_ds.save_to_disk(_os.path.join(cache_dir, "train"))
+    eval_ds.save_to_disk(_os.path.join(cache_dir, "eval"))
+    with open(cache_info_path, "w") as f:
+        json.dump({"config_hash": expected_hash}, f)
+
+    logger.info("Datasets cached to %s", cache_dir)
+    return train_ds, eval_ds
