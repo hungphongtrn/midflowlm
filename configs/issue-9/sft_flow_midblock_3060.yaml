@@ -59,3 +59,5 @@ training:
 
 checkpoint:
   path: "models/p3_d3_mix_c/checkpoint.pth"
+  remote_repo: "hungphongtrn/midflowlm-phase1"
+  remote_filename: "p3_d3_mix_c/checkpoint.pth"
