@@ -10,10 +10,10 @@
 ## Start Here
 New implementer? Read in this order:
 1. [strategy.md](./strategy.md) - Understand the big picture (3 min)
-2. [phase-01-config-data-pipeline.md](./phase-01-config-data-pipeline.md) - Current phase (10 min)
+2. [phase-02-remote-checkpoint-smoke-test.md](./phase-02-remote-checkpoint-smoke-test.md) - Current phase (15 min)
 3. [decisions.md](./decisions.md) - Context on choices made (5 min)
 
-**Do NOT read future phases.** They may change based on Phase 1 learnings.
+**Do NOT read future phases.** Phase 3 may change based on Phase 2 learnings.
 
 ## Phase Overview
 

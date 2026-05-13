@@ -49,3 +49,18 @@
 **Context:** Inline preprocessing adds significant logic to training script.
 **Decision:** New function `create_reasoning_sft_datasets_from_config()` in `src/data/reasoning_sft.py`. Script calls it. Helper functions for checkpoint/push stay in-script.
 **Rationale:** Data logic belongs in the data module. Script stays thin orchestration.
+
+## 2026-05-13 (Phase 1 complete): Cache hash omits max_total_tokens — uses max_seq_length
+**Context:** Phase 1 stub plan included `max_total_tokens` in the cache hash. The actual implementation uses `max_seq_length` only.
+**Decision:** Keep it as implemented. `max_total_tokens` in `processing` config is informational only — `create_reasoning_sft_datasets_from_config()` passes `data_cfg["max_seq_length"]` as both the filter budget and the packing length.
+**Rationale:** Both fields are set to the same value in both configs (8192 and 1024). The config field serves as human-readable documentation. No functional difference.
+
+## 2026-05-13 (Phase 1 complete): Execution order will be fixed in Phase 2
+**Context:** Phase 1 implementation left the original execution order intact (tokenizer → model → data). This is wrong — data should load before model so the tokenizer is available for both, and data loading doesn't depend on model state.
+**Decision:** Reorder in Phase 2 (data → checkpoint → model → validate → move to device).
+**Rationale:** Minimal diff per phase. Phase 1 focused purely on data pipeline correctness. Phase 2 addresses orchestration.
+
+## 2026-05-13 (Phase 1 complete): sft_data_glm.yaml is orphaned
+**Context:** `configs/issue-9/sft_data_glm.yaml` was used by the now-removed `scripts/prepare_reasoning_sft_data.py`.
+**Decision:** Leave the file in place for reference but do not reference it from train_sft.py. It is harmless dead config.
+**Rationale:** Removes unnecessary churn. It will fade out naturally.
