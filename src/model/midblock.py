@@ -16,6 +16,7 @@ IterativeMidblock is kept as an alias for backward compatibility.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 from typing import Optional, Literal
 
 from src.model.adapter import ContinuousTimeEmbedding, BoundaryConditioningAdapter
@@ -590,6 +591,17 @@ class FlowMidblock(nn.Module):
             if velocity_linear.bias is not None:
                 nn.init.zeros_(velocity_linear.bias)
 
+    def _euler_step(
+        self,
+        h_t: torch.Tensor,
+        h_start: torch.Tensor,
+        attention_mask: Optional[torch.Tensor],
+        t: torch.Tensor,
+        dt: float,
+    ) -> torch.Tensor:
+        velocity = self.get_velocity(h_t, h_start, attention_mask, t)
+        return h_t + velocity * dt
+
     def get_velocity(
         self,
         h_t: torch.Tensor,
@@ -698,6 +710,10 @@ class FlowMidblock(nn.Module):
         Convenience method that runs Euler integration for num_steps iterations.
         Uses uniform time steps from 0 to 1.
 
+        When training, each Euler step is wrapped in gradient checkpointing
+        to trade compute for memory — activations from only one step are kept
+        in GPU memory at a time instead of all T steps.
+
         Args:
             h_start: Starting hidden states [batch_size, seq_len, hidden_size]
             num_steps: Number of refinement steps
@@ -712,17 +728,22 @@ class FlowMidblock(nn.Module):
 
         # Create uniform time steps from 0 to 1
         timesteps = torch.linspace(0, 1, num_steps + 1, device=device)[:-1]
+        dt = 1.0 / num_steps
 
         for step_idx in range(num_steps):
             t = torch.full((batch_size,), float(timesteps[step_idx]), device=device)
-            dt = 1.0 / num_steps
-            h = self.forward(
-                h_t=h,
-                h_start=h_start,
-                attention_mask=attention_mask,
-                t=t,
-                dt=dt,
-            )
+            if self.training:
+                h = checkpoint(
+                    self._euler_step,
+                    h,
+                    h_start,
+                    attention_mask,
+                    t,
+                    dt,
+                    use_reentrant=False,
+                )
+            else:
+                h = self._euler_step(h, h_start, attention_mask, t, dt)
 
         return h
 

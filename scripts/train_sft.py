@@ -241,6 +241,7 @@ def main():
         num_train_epochs=training_cfg.get("num_train_epochs", 1),
         max_steps=training_cfg.get("max_steps", -1),
         # Optimizer
+        optim="adamw_8bit",
         learning_rate=training_cfg.get("learning_rate", 1e-4),
         weight_decay=training_cfg.get("weight_decay", 0.01),
         adam_beta1=training_cfg.get("adam_beta1", 0.9),

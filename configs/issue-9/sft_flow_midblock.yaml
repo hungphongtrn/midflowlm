@@ -62,7 +62,7 @@ training:
 
   # Performance
   dataloader_num_workers: 2
-  gradient_checkpointing: false  # Only midblock is trainable
+  gradient_checkpointing: true  # Frees Qwen layer activations
   dataloader_drop_last: false
   dataloader_pin_memory: true
 
