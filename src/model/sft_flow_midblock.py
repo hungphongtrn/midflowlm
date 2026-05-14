@@ -57,6 +57,7 @@ class SFTFlowMidblockModel(nn.Module):
         self.thinking_level = thinking_level
         self.span_depth = end_layer - start_layer + 1
         self.torch_dtype = torch_dtype
+        self.uses_liger_kernel = False
 
         self.config = AutoConfig.from_pretrained(model_name)
         self._resolve_layer_count()
@@ -116,6 +117,7 @@ class SFTFlowMidblockModel(nn.Module):
                 config=self.config,
                 torch_dtype=self.torch_dtype,
             )
+            self.uses_liger_kernel = True
             logger.info("Loaded Qwen via AutoLigerKernelForCausalLM")
         except ImportError as e:
             logger.warning(f"AutoLigerKernelForCausalLM not available ({e}), falling back to AutoModelForCausalLM")

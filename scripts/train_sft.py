@@ -18,7 +18,6 @@ import yaml
 from transformers import (
     AutoTokenizer,
     TrainingArguments,
-    Trainer,
     DataCollatorForSeq2Seq,
     set_seed,
 )
@@ -33,6 +32,7 @@ from src.training.sft_utils import (
     validate_model_for_training,
     estimate_training_budget,
 )
+from src.training.liger_trainer import LigerTrainer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -237,6 +237,9 @@ def main():
         fp16=False,
         bf16=not args.fp32 and torch.cuda.is_bf16_supported(),
         fp16_full_eval=False,
+        use_liger_kernel=training_cfg.get(
+            "use_liger_kernel", getattr(model, "uses_liger_kernel", False)
+        ),
         # Schedule
         num_train_epochs=training_cfg.get("num_train_epochs", 1),
         max_steps=training_cfg.get("max_steps", -1),
@@ -288,7 +291,7 @@ def main():
         label_pad_token_id=-100,
     )
 
-    trainer = Trainer(
+    trainer = LigerTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
