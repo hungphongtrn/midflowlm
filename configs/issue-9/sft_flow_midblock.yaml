@@ -21,9 +21,9 @@ data:
   processing:
     max_total_tokens: 8192
     num_proc: 4
-    val_split: 0.02
+    val_split: 0.001  # ~1K eval samples from ~1M dataset
     max_train_samples: null
-    max_eval_samples: 200
+    max_eval_samples: null  # Use all val split (~1K samples)
     packing_strategy: "bfd"
     seed: 1337
   cache_dir: "./data/reasoning_sft_cache"
@@ -51,15 +51,20 @@ training:
   # Checkpointing
   save_strategy: "steps"
   save_steps: 500
-  save_total_limit: 2
+  save_total_limit: 3
+  save_only_model: false
 
   # Logging
   logging_steps: 10
   report_to: ["wandb"]
+  include_num_input_tokens_seen: true
 
   # Evaluation
   eval_strategy: "steps"
   eval_steps: 500
+  eval_on_start: true
+  eval_accumulation_steps: 1
+  prediction_loss_only: true
 
   # Performance
   dataloader_num_workers: 2

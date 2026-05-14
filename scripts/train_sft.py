@@ -252,16 +252,20 @@ def main():
         save_strategy=training_cfg.get("save_strategy", "steps"),
         save_steps=training_cfg.get("save_steps", 500),
         save_total_limit=training_cfg.get("save_total_limit", 2),
-        save_only_model=False,
+        save_only_model=training_cfg.get("save_only_model", False),
         load_best_model_at_end=training_cfg.get("eval_strategy", "steps") != "no",
         # Logging
         logging_dir=os.path.join(output_dir, "logs"),
         logging_strategy="steps",
         logging_steps=training_cfg.get("logging_steps", 10),
         report_to=training_cfg.get("report_to", ["tensorboard"]),
+        include_num_input_tokens_seen=training_cfg.get("include_num_input_tokens_seen", False),
         # Evaluation
         eval_strategy=training_cfg.get("eval_strategy", "steps"),
         eval_steps=training_cfg.get("eval_steps", 500),
+        eval_on_start=training_cfg.get("eval_on_start", False),
+        eval_accumulation_steps=training_cfg.get("eval_accumulation_steps"),
+        prediction_loss_only=training_cfg.get("prediction_loss_only", False),
         # Misc
         seed=seed,
         dataloader_num_workers=training_cfg.get("dataloader_num_workers", 2),
