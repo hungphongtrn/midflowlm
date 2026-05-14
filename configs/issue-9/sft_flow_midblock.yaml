@@ -34,9 +34,10 @@ training:
   run_name: "sft_flow_midblock_full"
 
   # Memory budget: ~20GB for model + data + ODE intermediate states
-  per_device_train_batch_size: 1
-  per_device_eval_batch_size: 1
-  gradient_accumulation_steps: 4  # Effective BS = 4
+  # Peak VRAM with BS=1 was 4.2GB — plenty of headroom on 24GB
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 8
+  gradient_accumulation_steps: 2  # Effective BS = 8
 
   # Schedule
   num_train_epochs: 1
