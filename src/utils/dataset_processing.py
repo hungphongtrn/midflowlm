@@ -20,6 +20,100 @@ from datasets import Dataset, concatenate_datasets
 from transformers import PreTrainedTokenizer
 
 
+def compute_fingerprint(**config_kwargs: Any) -> str:
+    """Compute a deterministic short fingerprint from JSON-serializable kwargs."""
+    import hashlib
+    import json
+
+    json_str = json.dumps(config_kwargs, sort_keys=True, separators=(",", ":"))
+    return hashlib.md5(json_str.encode("utf-8")).hexdigest()[:16]
+
+
+def apply_chat_template(
+    examples: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    chat_template: str | None = None,
+    enable_thinking: bool = True,
+    thinking_block_delimiters: List[str] | None = None,
+) -> Dict[str, List[str]]:
+    """Render batched ``messages`` examples into text using tokenizer chat template.
+
+    This is a local fallback replacement for the previously external helper.
+    """
+    del chat_template, enable_thinking, thinking_block_delimiters
+
+    messages_batch = examples.get("messages")
+    if messages_batch is None:
+        raise ValueError("Expected 'messages' column for SFT tokenization.")
+
+    texts: List[str] = []
+    for messages in messages_batch:
+        rendered = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        texts.append(rendered)
+    return {"text": texts}
+
+
+def load_and_format_dataset(
+    ds_config: Dict[str, Any],
+    max_samples: int | None = None,
+    fingerprint: str | None = None,
+) -> Dataset:
+    """Load a dataset and normalize it to include a ``messages`` column.
+
+    Supports datasets from Hugging Face Hub or local disk (Dataset/DatasetDict).
+    """
+    import os as _os
+    from datasets import DatasetDict, load_dataset, load_from_disk
+
+    del fingerprint
+
+    path = ds_config["path"]
+    split = ds_config.get("split", "train")
+    disk = ds_config.get("disk", False)
+
+    if disk or (isinstance(path, str) and _os.path.isdir(path)):
+        ds_or_dict = load_from_disk(path)
+        if isinstance(ds_or_dict, DatasetDict):
+            if split not in ds_or_dict:
+                split = next(iter(ds_or_dict.keys()))
+            dataset = ds_or_dict[split]
+        else:
+            dataset = ds_or_dict
+    else:
+        dataset = load_dataset(path, split=split)
+
+    if max_samples is not None:
+        dataset = dataset.select(range(min(max_samples, len(dataset))))
+
+    if "messages" in dataset.column_names:
+        return dataset
+
+    if "conversations" in dataset.column_names:
+        def _map_conversations(example: Dict[str, Any]) -> Dict[str, Any]:
+            mapped = []
+            for turn in example.get("conversations", []) or []:
+                src_role = str(turn.get("from", "")).lower()
+                if src_role == "human":
+                    role = "user"
+                elif src_role in {"gpt", "assistant"}:
+                    role = "assistant"
+                else:
+                    role = "user"
+                mapped.append({"role": role, "content": turn.get("value", "")})
+            return {"messages": mapped}
+
+        return dataset.map(_map_conversations)
+
+    raise ValueError(
+        "Could not format dataset to messages format. "
+        f"Available columns: {list(dataset.column_names)}"
+    )
+
+
 # ============================================================================
 # Longest Common Sublist (cloned from unsloth)
 # ============================================================================
@@ -270,9 +364,6 @@ def tokenize_sft_dataset(
     Applies the chat template to render messages to text, then tokenizes.
     Returns a dataset with an ``input_ids`` column (no labels yet).
     """
-    # Lazy import to avoid circular dependency at module level
-    from dataset_utils_ift import apply_chat_template
-
     def _tokenize_fn(examples: Dict) -> Dict:
         result = apply_chat_template(
             examples,
@@ -684,9 +775,6 @@ def prepare_preprocessed_dataset(
         (train_dataset, eval_dataset) with ``input_ids`` + ``labels`` columns.
         Both are ``None`` if ``verify_only=True``.
     """
-    from cache_utils import compute_fingerprint
-    from dataset_utils_ift import load_and_format_dataset
-
     training_mode = config.get("training_mode", "sft")
     dataset_config = config["dataset"]
     training_cfg = config["training"]
