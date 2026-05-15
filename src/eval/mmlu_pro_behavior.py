@@ -16,6 +16,7 @@ import yaml
 from datasets import load_dataset
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
+from src.eval.generation import greedy_generate
 from src.eval.text_checkpoint_sweep import (
     create_student,
     load_student_checkpoint,
@@ -172,69 +173,21 @@ def generate_behavior_completion(
     encoded = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
     input_ids = encoded["input_ids"].to(model.device)
     attention_mask = encoded["attention_mask"].to(model.device)
-    completion_token_ids: list[int] = []
-    eos_token_id = tokenizer.eos_token_id
-    stopped_on_eos = False
-
     start_time = time.perf_counter()
-    model.eval()
-    with torch.no_grad():
-        for _ in range(max_new_tokens):
-            if is_student:
-                outputs = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    num_steps=num_steps,
-                    solver_method=solver_method,
-                )
-            else:
-                outputs = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    num_steps=num_steps,
-                    solver_method=solver_method,
-                )
-
-            logits = outputs["logits"] if isinstance(outputs, dict) else outputs
-            next_token_logits = logits[:, -1, :]
-
-            if temperature > 0:
-                probs = torch.softmax(next_token_logits / temperature, dim=-1)
-                if top_p < 1.0:
-                    sorted_probs, sorted_indices = torch.sort(
-                        probs, descending=True, dim=-1
-                    )
-                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
-                    sorted_indices_to_remove = cumulative_probs > top_p
-                    sorted_indices_to_remove[..., 0] = False
-                    indices_to_remove = sorted_indices_to_remove.scatter(
-                        -1, sorted_indices, sorted_indices_to_remove
-                    )
-                    probs = probs.masked_fill(indices_to_remove, 0.0)
-                    probs = probs / probs.sum(dim=-1, keepdim=True)
-                next_token = torch.multinomial(probs, num_samples=1)
-            else:
-                next_token = next_token_logits.argmax(dim=-1, keepdim=True)
-
-            next_token_id = int(next_token.item())
-            completion_token_ids.append(next_token_id)
-
-            input_ids = torch.cat([input_ids, next_token], dim=1)
-            attention_mask = torch.cat(
-                [
-                    attention_mask,
-                    torch.ones_like(next_token, device=attention_mask.device),
-                ],
-                dim=1,
-            )
-
-            if (
-                stop_on_eos
-                and eos_token_id is not None
-                and next_token_id == eos_token_id
-            ):
-                stopped_on_eos = True
-                break
+    generation = greedy_generate(
+        model=model,
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        num_steps=num_steps,
+        solver_method=solver_method,
+        max_new_tokens=max_new_tokens,
+        stop_on_eos=stop_on_eos,
+        eos_token_id=tokenizer.eos_token_id,
+        temperature=temperature,
+        top_p=top_p,
+    )
+    completion_token_ids = generation["generated_token_ids"]
+    stopped_on_eos = generation["stopped_on_eos"]
 
     latency_ms = (time.perf_counter() - start_time) * 1000
     generated_text = tokenizer.decode(completion_token_ids, skip_special_tokens=True)

@@ -12,6 +12,7 @@ import torch
 import yaml
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
+from src.eval.generation import greedy_generate
 from src.model.student_qwen import FrozenQwenStudent
 
 
@@ -177,7 +178,7 @@ def load_student_checkpoint(
     }
 
 
-def greedy_generate(
+def generate_sweep_result(
     model: FrozenQwenStudent,
     tokenizer: PreTrainedTokenizerBase,
     prompt: str,
@@ -188,83 +189,25 @@ def greedy_generate(
     temperature: float = 0.0,
     top_p: float = 1.0,
 ) -> SweepResult:
-    """Generate text with optional temperature sampling.
-
-    Args:
-        model: The student model
-        tokenizer: Tokenizer
-        prompt: Input prompt
-        num_steps: Number of ODE solver steps
-        max_new_tokens: Maximum tokens to generate
-        stop_on_eos: Whether to stop at EOS token
-        solver_method: ODE solver method
-        temperature: Sampling temperature (0 = greedy, >0 = sample)
-        top_p: Nucleus sampling threshold (1.0 = disabled)
-    """
     encoded = tokenizer(prompt, return_tensors="pt")
     input_ids = encoded["input_ids"].to(model.device)
     attention_mask = encoded["attention_mask"].to(model.device)
 
-    completion_token_ids: list[int] = []
-    stopped_on_eos = False
-    eos_token_id = tokenizer.eos_token_id
-
-    model.eval()
-    with torch.no_grad():
-        for _ in range(max_new_tokens):
-            logits = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                num_steps=num_steps,
-                solver_method=solver_method,
-            )
-            next_token_logits = logits[:, -1, :]
-
-            # Apply temperature sampling if temperature > 0
-            if temperature > 0:
-                probs = torch.softmax(next_token_logits / temperature, dim=-1)
-
-                # Apply top-p (nucleus) filtering
-                if top_p < 1.0:
-                    sorted_probs, sorted_indices = torch.sort(
-                        probs, descending=True, dim=-1
-                    )
-                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
-
-                    # Remove tokens with cumulative probability above threshold
-                    sorted_indices_to_remove = cumulative_probs > top_p
-                    # Keep at least one token
-                    sorted_indices_to_remove[..., 0] = False
-
-                    indices_to_remove = sorted_indices_to_remove.scatter(
-                        -1, sorted_indices, sorted_indices_to_remove
-                    )
-                    probs = probs.masked_fill(indices_to_remove, 0.0)
-                    probs = probs / probs.sum(dim=-1, keepdim=True)
-
-                next_token = torch.multinomial(probs, num_samples=1)
-            else:
-                next_token = next_token_logits.argmax(dim=-1, keepdim=True)
-
-            next_token_id = int(next_token.item())
-            completion_token_ids.append(next_token_id)
-
-            input_ids = torch.cat([input_ids, next_token], dim=1)
-            attention_mask = torch.cat(
-                [
-                    attention_mask,
-                    torch.ones_like(next_token, device=attention_mask.device),
-                ],
-                dim=1,
-            )
-
-            if (
-                stop_on_eos
-                and eos_token_id is not None
-                and next_token_id == eos_token_id
-            ):
-                stopped_on_eos = True
-                break
+    generation = greedy_generate(
+        model=model,
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        num_steps=num_steps,
+        solver_method=solver_method,
+        max_new_tokens=max_new_tokens,
+        stop_on_eos=stop_on_eos,
+        eos_token_id=tokenizer.eos_token_id,
+        temperature=temperature,
+        top_p=top_p,
+    )
+    completion_token_ids = generation["generated_token_ids"]
+    stopped_on_eos = generation["stopped_on_eos"]
+    input_ids = generation["input_ids"]
 
     completion_text = tokenizer.decode(completion_token_ids, skip_special_tokens=True)
     full_text = tokenizer.decode(input_ids[0], skip_special_tokens=True)
@@ -309,7 +252,7 @@ def build_comparison_rows(
     rows = []
     for text in texts:
         original_result = asdict(
-            greedy_generate(
+            generate_sweep_result(
                 original_model,
                 tokenizer,
                 text,
@@ -322,7 +265,7 @@ def build_comparison_rows(
         )
         trained_results = {
             str(step_count): asdict(
-                greedy_generate(
+                generate_sweep_result(
                     trained_model,
                     tokenizer,
                     text,
