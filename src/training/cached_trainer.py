@@ -1,18 +1,20 @@
-"""DEPRECATED: Raw PyTorch training loop for iterative midblock with cache support.
+"""DEPRECATED MODULE: cache-based trainer implementation.
 
-⚠️ WARNING: This trainer is deprecated and will be removed in a future version.
-Please use the new `Trainer` class from `src.training.trainer` which defaults to
-online_no_cache mode. Cache-based training is now an optional feature, not the primary path.
+===============================================================================
+DEPRECATION NOTICE
+===============================================================================
+This file is deprecated and kept only for backward compatibility.
 
-This module is kept for backward compatibility with existing cache-based workflows.
-It implements:
-- Training step with gradient accumulation
-- Validation step
-- Checkpoint save/load
-- Variable T sampling from config
-- AMP/bf16 mixed precision support
-- Logging of train and val metrics
-- Support for offline_cache and online_write_through_cache modes
+- Do NOT modify this file for new training behavior.
+- Do NOT add new features here.
+- For all new work, use `src.training.trainer.Trainer` (online_no_cache default).
+
+Rationale:
+- `Trainer` is the primary path for this repository.
+- Cache-based modes are legacy/optional and may be removed in a future release.
+
+This module remains importable for older workflows that still rely on
+`CachedTrainer`.
 """
 
 import math

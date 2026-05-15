@@ -26,6 +26,8 @@ Example:
     trainer.fit()
 """
 
+import warnings
+
 from src.training.trainer import Trainer, OnlineNoCacheTrainer
 from src.training.losses import DistillationLoss
 from src.training.teacher_state import (
@@ -34,9 +36,6 @@ from src.training.teacher_state import (
     get_teacher_state_mode,
     validate_teacher_state_config,
 )
-
-# Deprecated import - emits deprecation warning
-from src.training.cached_trainer import CachedTrainer
 
 __all__ = [
     "Trainer",
@@ -48,3 +47,17 @@ __all__ = [
     "get_teacher_state_mode",
     "validate_teacher_state_config",
 ]
+
+
+def __getattr__(name):
+    if name == "CachedTrainer":
+        warnings.warn(
+            "src.training.CachedTrainer is deprecated and kept only for backward "
+            "compatibility. Use src.training.Trainer for all new work.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from src.training.cached_trainer import CachedTrainer
+
+        return CachedTrainer
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
