@@ -292,7 +292,7 @@ class DistillationLoss(nn.Module):
         attention-masked loss computation when mask_padding_tokens is enabled.
 
         Args:
-            model: Student model with midblock.get_velocity() method
+            model: Student model with predict_velocity() method
             teacher_batch: Dict with 'h_start', 'velocity_target', 'attention_mask'
             t: Continuous time values [batch_size], sampled externally by caller
                (typically via trainer.sample_continuous_time())
@@ -311,13 +311,23 @@ class DistillationLoss(nn.Module):
         t_expanded = t.view(batch_size, 1, 1)
         h_t = teacher_batch["h_start"] + t_expanded * velocity_target
 
-        # Get velocity prediction from model's midblock
-        v_pred = model.midblock.get_velocity(
-            h_t=h_t,
-            h_start=teacher_batch["h_start"],
-            attention_mask=teacher_batch.get("attention_mask"),
-            t=t,
-        )
+        # Get velocity prediction through the student interface
+        predict_velocity = getattr(type(model), "predict_velocity", None)
+        if callable(predict_velocity):
+            v_pred = model.predict_velocity(
+                h_t=h_t,
+                h_start=teacher_batch["h_start"],
+                attention_mask=teacher_batch.get("attention_mask"),
+                t=t,
+            )
+        else:
+            # Backward-compatible fallback for tests/legacy mocks
+            v_pred = model.midblock.get_velocity(
+                h_t=h_t,
+                h_start=teacher_batch["h_start"],
+                attention_mask=teacher_batch.get("attention_mask"),
+                t=t,
+            )
 
         # Compute MSE between predicted and target velocity
         squared_error = (v_pred - velocity_target) ** 2

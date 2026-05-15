@@ -257,6 +257,23 @@ class FrozenQwenStudent(nn.Module):
         else:
             return self.model
 
+    def predict_velocity(
+        self,
+        h_t: torch.Tensor,
+        t: torch.Tensor,
+        h_start: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Predict velocity via the student model interface."""
+        if self.midblock is None:
+            raise RuntimeError("predict_velocity is unavailable in bypass mode")
+        return self.midblock.get_velocity(
+            h_t=h_t,
+            h_start=h_start,
+            attention_mask=attention_mask,
+            t=t,
+        )
+
     def _extract_h_start(
         self,
         input_ids: torch.Tensor,
