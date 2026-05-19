@@ -3,9 +3,9 @@
 > **For agentic workers:** Use subagent-driven-development. Start with Phase 1 — don't read ahead.
 
 ## Quick Status
-- **Current Phase:** Phase 1 - Spike Investigation
-- **Next Up:** Phase 2 - Config Adaptation & Smoke Test (pending Phase 1 completion)
-- **Overall Progress:** 0/2 phases complete
+- **Current Phase:** Phase 1 - Spike Investigation ✅ COMPLETE
+- **Next Up:** Phase 2 - Config Adaptation & Smoke Test (ready)
+- **Overall Progress:** 1/2 phases complete
 
 ## Start Here
 New implementer? Read in this order:
@@ -19,8 +19,8 @@ New implementer? Read in this order:
 
 | Phase | Status | Outcome | Document |
 |-------|--------|---------|----------|
-| 1 - Spike Investigation | Not Started | Checkpoint downloaded + VRAM budget known | [phase-01](./phase-01-spike-investigation.md) |
-| 2 - Config & Smoke Test | Pending | Validated resume config on 3060 | [phase-02](./phase-02-config-and-smoke-test.md) |
+| 1 - Spike Investigation | ✅ Done | bs=1/8192 fits, eval must be disabled | [phase-01](./phase-01-spike-investigation.md) |
+| 2 - Config & Smoke Test | Not Started | Validated resume config on 3060 | [phase-02](./phase-02-config-and-smoke-test.md) |
 
 ## Key Decisions
 See [decisions.md](./decisions.md) for rationale on major choices.
